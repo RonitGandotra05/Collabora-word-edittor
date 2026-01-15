@@ -62,6 +62,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 	addHooks: function () {
 		this._map.on('postMessage', this._postMessage, this);
+		this._map.on('wordmetaindexready', this._onWordMetaIndexReady, this);
 
 		// init messages
 		this._map.on('docloaded', this._postLoaded, this);
@@ -106,6 +107,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 	removeHooks: function () {
 		this._map.off('postMessage', this._postMessage, this);
+		this._map.off('wordmetaindexready', this._onWordMetaIndexReady, this);
 
 		// init messages
 		this._map.off('docloaded', this._postLoaded, this);
@@ -813,15 +815,32 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		else if (msg.MessageId === 'Navigate_WordTime') {
 			if (msg.Values && this._map.wordMeta) {
 				var wordIndex = this._map.wordMeta.findWordByTime(msg.Values.time);
-				if (wordIndex >= 0) {
+				var hasBookmark = wordIndex >= 0 && this._map.wordMeta.hasBookmark(wordIndex);
+				if (hasBookmark) {
 					this._map.wordMeta.navigateToWord(wordIndex);
 				}
 				this._postMessage({
 					msgId: 'Navigate_WordTime_Resp',
-					args: { time: msg.Values.time, wordIndex: wordIndex }
+					args: {
+						time: msg.Values.time,
+						wordIndex: wordIndex,
+						found: wordIndex >= 0,
+						hasBookmark: hasBookmark
+					}
 				});
 			}
 		}
+	},
+
+	_onWordMetaIndexReady: function (e) {
+		this._postMessage({
+			msgId: 'WordMeta_IndexReady',
+			args: {
+				wordCount: e.wordCount,
+				indexedCount: e.indexedCount,
+				missingCount: e.missingCount
+			}
+		});
 	},
 
 	_postMessage: function (e) {

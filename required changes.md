@@ -184,3 +184,133 @@ If the match fails:
 
 If any of these are missing, highlights will not show.
 
+---
+
+## 8. Implemented changes (this repo)
+
+### 8.1 Collabora-side code changes
+
+- **WordMeta control added**  
+  `browser/src/control/Control.WordMeta.js` now stores word metadata, creates bookmarks, and highlights words.
+- **PostMessage handlers added**  
+  `browser/src/map/handler/Map.WOPI.js` handles `Import_WordMeta`, `Get_WordMeta`, and `Navigate_WordTime`.
+- **Plugin initialization**  
+  `browser/src/app/ServerConnectionService.ts` initializes the WordMeta control on document load.
+- **Build inclusion**  
+  `browser/Makefile.am` includes `Control.WordMeta.js` in the browser bundle list.
+
+### 8.2 Bookmark indexing behavior
+
+When `Import_WordMeta` arrives:
+- Metadata is stored in memory.
+- If the DOCX already contains `WMETA_<index>` bookmarks, Collabora reuses them and only indexes missing words.
+- Bookmark indexing runs **in the background** (batched).
+- Each missing word is located via `.uno:ExecuteSearch`, then a bookmark is inserted with `.uno:InsertBookmark`.
+- Bookmark names are `WMETA_<index>` (index is 0-based).
+- Highlighting prefers bookmark jump (`.uno:JumpToMark`) when available, otherwise it falls back to search.
+- Navigation is debounced to reduce UI thrashing.
+
+Key parameters (tunable in `Control.WordMeta.js`):
+- `batchSize = 50`
+- `batchDelayMs = 10`
+- `searchTimeoutMs = 1500`
+- `highlightDebounceMs = 80`
+
+### 8.3 Known limitations
+
+- Bookmark creation is **sequential search-based**. If the transcript differs from the document (punctuation/whitespace), some words may not map.
+- Bookmark jump behavior depends on Collabora’s handling of `.uno:JumpToMark`. If it only moves the cursor, highlight styling may still need a core-side command for selection + highlight.
+
+---
+
+## 9. Frontend ↔ Collabora communication
+
+### 9.1 Required setup
+
+1) In WOPI `CheckFileInfo`, set:
+```
+PostMessageOrigin = http://localhost:3000
+```
+
+2) In the Collabora iframe URL, pass:
+```
+postMessageOrigin=http%3A%2F%2Flocalhost%3A3000
+```
+
+If these do not match your frontend origin, Collabora will ignore messages.
+
+### 9.2 Commands (Frontend → Collabora)
+
+Import word metadata:
+```json
+{
+  "MessageId": "Import_WordMeta",
+  "Values": {
+    "words": [
+      { "word": "Hello", "start": 0.0, "end": 0.52, "confidence": 0.98 }
+    ]
+  }
+}
+```
+
+Navigate by time:
+```json
+{
+  "MessageId": "Navigate_WordTime",
+  "Values": { "time": 12.34 }
+}
+```
+
+Get metadata for a word:
+```json
+{
+  "MessageId": "Get_WordMeta",
+  "Values": { "index": 0 }
+}
+```
+
+### 9.3 Responses (Collabora → Frontend)
+
+```json
+{
+  "MessageId": "Import_WordMeta_Resp",
+  "Values": { "success": true, "wordCount": 1234 }
+}
+```
+
+```json
+{
+  "MessageId": "Navigate_WordTime_Resp",
+  "Values": { "time": 12.34, "wordIndex": 456 }
+}
+```
+
+```json
+{
+  "MessageId": "Get_WordMeta_Resp",
+  "Values": { "index": 0, "metadata": { "word": "Hello", "start": 0.0, "end": 0.52 } }
+}
+```
+
+### 9.4 Frontend example (postMessage)
+
+```js
+const msg = {
+  MessageId: 'Import_WordMeta',
+  Values: { words }
+};
+iframe.contentWindow.postMessage(JSON.stringify(msg), 'http://localhost:9980');
+```
+
+### 9.5 Runtime debugging
+
+In the Collabora iframe console:
+```
+app.map.wordMeta.isLoaded()
+app.map.wordMeta.getWordCount()
+```
+
+In the parent window console:
+```
+window.addEventListener('message', (e) => console.log('MSG:', e.data));
+```

@@ -67,8 +67,14 @@ window.L.WriterTileLayer = window.L.CanvasTileLayer.extend({
 			this._map.zotero.onFieldValue(values.setRefs);
 		} else if (this._map.zotero && values.setRef) {
 			this._map.zotero.handleFieldUnderCursor(values.setRef);
-		} else if (this._map.zotero && values.bookmarks) {
-			this._map.zotero.handleBookmark(values.bookmarks);
+		} else if (values.bookmarks) {
+			var handled = false;
+			if (this._map.wordMeta) {
+				handled = this._map.wordMeta.handleBookmarks(values.bookmarks) || handled;
+			}
+			if (this._map.zotero && !handled) {
+				this._map.zotero.handleBookmark(values.bookmarks);
+			}
 		} else if (this._map.zotero && values.bookmark) {
 			this._map.zotero.fetchCustomProperty(values.bookmark.name);
 		} else if (this._map.zotero && values.sections) {
