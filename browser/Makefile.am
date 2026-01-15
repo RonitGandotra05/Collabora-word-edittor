@@ -526,6 +526,7 @@ COOL_JS_LST =\
 	src/control/Control.AutoFillPreviewTooltip.ts \
 	src/control/Control.AddressInputField.ts \
 	src/control/Control.Zotero.js \
+	src/control/Control.WordMeta.js \
 	src/control/Permission.js \
 	src/control/Toolbar.js \
 	src/control/Signing.js \
@@ -1156,6 +1157,7 @@ pot:
 		src/control/Control.UIManager.ts \
 		src/control/Control.UserList.ts \
 		src/control/Control.Zotero.js \
+		src/control/Control.WordMeta.js \
 		src/control/HRuler.ts \
 		src/control/Parts.js \
 		src/control/Permission.js \

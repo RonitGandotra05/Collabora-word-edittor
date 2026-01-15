@@ -73,6 +73,13 @@ class ServerConnectionService {
 	/// see _appLoadedConditions in Map.Wopi.js
 	public onDocumentLoaded() {
 		app.console.debug('ServerConnectionService: onDocumentLoaded');
+
+		// Initialize WordMeta control for word-level metadata (timestamps, etc.)
+		if (!app.map.wordMeta && window.L.control.wordMeta) {
+			app.console.debug('ServerConnectionService: initialize WordMeta plugin');
+			const wordMetaPlugin = window.L.control.wordMeta();
+			app.map.addControl(wordMetaPlugin);
+		}
 	}
 
 	public onFirstTileReceived() {

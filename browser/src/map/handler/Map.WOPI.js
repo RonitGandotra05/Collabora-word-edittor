@@ -56,11 +56,11 @@ window.L.Map.WOPI = window.L.Handler.extend({
 	_appLoaded: false,
 	_insertImageMenuSetupDone: false,
 
-	initialize: function(map) {
+	initialize: function (map) {
 		this._map = map;
 	},
 
-	addHooks: function() {
+	addHooks: function () {
 		this._map.on('postMessage', this._postMessage, this);
 
 		// init messages
@@ -73,7 +73,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		this._map.on('wopiprops', this._setWopiProps, this);
 		window.L.DomEvent.on(window, 'message', this._postMessageListener, this);
 
-		this._map.on('updateviewslist', function() { this._postViewsMessage('Views_List'); }, this);
+		this._map.on('updateviewslist', function () { this._postViewsMessage('Views_List'); }, this);
 
 		if (!window.ThisIsAMobileApp) {
 			// override the window.open to issue a postMessage, so that
@@ -104,7 +104,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		}
 	},
 
-	removeHooks: function() {
+	removeHooks: function () {
 		this._map.off('postMessage', this._postMessage, this);
 
 		// init messages
@@ -119,11 +119,11 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 	// Return whether there is the capability to rename, not the permission.
 	// Since we fall back on Save As for rename isn't supported.
-	_supportsRename: function() {
+	_supportsRename: function () {
 		return !!this.SupportsRename || !this.UserCanNotWriteRelative;
 	},
 
-	_setWopiProps: function(wopiInfo) {
+	_setWopiProps: function (wopiInfo) {
 		var overridenFileInfo = window.checkFileInfoOverride;
 		// Store postmessageorigin property, if it exists
 		if (wopiInfo['PostMessageOrigin']) {
@@ -176,7 +176,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		this.setupImageInsertionMenu();
 	},
 
-	sendFrameReady: function() {
+	sendFrameReady: function () {
 		this._map.fire('postMessage', {
 			msgId: 'App_LoadingStatus',
 			args: {
@@ -188,7 +188,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		});
 	},
 
-	sendDocumentLoaded: function() {
+	sendDocumentLoaded: function () {
 		this._map.fire('postMessage', {
 			msgId: 'App_LoadingStatus',
 			args: {
@@ -198,7 +198,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		});
 	},
 
-	setupImageInsertionMenu: function() {
+	setupImageInsertionMenu: function () {
 		if (this._insertImageMenuSetupDone) {
 			return;
 		}
@@ -214,27 +214,27 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		var menuEntriesCompare = JSDialog.MenuDefinitions.get('CompareDocumentsMenu');
 
 		if (this.EnableInsertRemoteImage) {
-			menuEntriesImage.push({action: 'remotegraphic', text: _UNO('.uno:InsertGraphic', '', true)});
+			menuEntriesImage.push({ action: 'remotegraphic', text: _UNO('.uno:InsertGraphic', '', true) });
 		}
 
 		if (this.EnableInsertRemoteFile) {
 			/* Separate, because needs explicit integration support */
-			menuEntriesMultimedia.push({action: 'remotemultimedia', text: _UNO('.uno:InsertAVMedia', '', true)});
+			menuEntriesMultimedia.push({ action: 'remotemultimedia', text: _UNO('.uno:InsertAVMedia', '', true) });
 
-			menuEntriesCompare.push({action: 'remotecomparedocuments', text: _UNO('.uno:CompareDocuments', '', true)});
+			menuEntriesCompare.push({ action: 'remotecomparedocuments', text: _UNO('.uno:CompareDocuments', '', true) });
 		}
 
 		this._insertImageMenuSetupDone = true;
 	},
 
-	resetAppLoaded: function() {
+	resetAppLoaded: function () {
 		this._appLoaded = false;
 		for (var key in this._appLoadedConditions) {
 			this._appLoadedConditions[key] = false;
 		}
 	},
 
-	_postLoaded: function(e) {
+	_postLoaded: function (e) {
 		app.console.debug('PostMessage: _postLoaded - ' + e.type);
 
 		if (this._appLoaded) {
@@ -243,8 +243,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 		if (e.type === 'docloaded') {
 			// doc unloaded
-			if (!e.status)
-			{
+			if (!e.status) {
 				this._appLoadedConditions[e.type] = false;
 				return;
 			}
@@ -264,7 +263,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 	// Naturally we set a CSP to catch badness, but check here as well.
 	// Checking whether a message came from our iframe's parents is
 	// un-necessarily difficult.
-	_allowMessageOrigin: function(e) {
+	_allowMessageOrigin: function (e) {
 		// e.origin === 'null' when sandboxed
 		if (e.origin === 'null')
 			return false;
@@ -281,8 +280,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 		// sent from the server
 		var i;
-		if (!this._allowedOrigins && window.frameAncestors)
-		{
+		if (!this._allowedOrigins && window.frameAncestors) {
 			var ancestors = window.frameAncestors.trim().split(' ');
 			this._allowedOrigins = ancestors;
 			// convert to JS regexps from localhost:* to https*://localhost:.*
@@ -291,11 +289,9 @@ window.L.Map.WOPI = window.L.Handler.extend({
 			}
 		}
 
-		if (this._allowedOrigins)
-		{
+		if (this._allowedOrigins) {
 			for (i = 0; i < this._allowedOrigins.length; i++) {
-				if (e.origin.match(this._allowedOrigins[i]))
-				{
+				if (e.origin.match(this._allowedOrigins[i])) {
 					this._cachedGoodOrigin = e.origin;
 					return true;
 				}
@@ -304,8 +300,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 		// chrome only
 		if (window.location.ancestorOrigins &&
-		    window.location.ancestorOrigins.contains(e.origin))
-		{
+			window.location.ancestorOrigins.contains(e.origin)) {
 			this._cachedGoodOrigin = e.origin;
 			return true;
 		}
@@ -319,7 +314,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		return false;
 	},
 
-	_postMessageListener: function(e) {
+	_postMessageListener: function (e) {
 		if (!this._allowMessageOrigin(e)) {
 			window.app.console.error('PostMessage not allowed due to incorrect origin.');
 			return;
@@ -440,12 +435,12 @@ window.L.Map.WOPI = window.L.Handler.extend({
 			/* id is optional */
 			if (msg.Values) {
 				switch (msg.Values.id) {
-				case 'Navigator':
-				case 'ModifyPage':
-				case 'CustomAnimation':
-				case 'MasterSlidesPanel':
-					this._map.sendUnoCommand(`.uno:${msg.Values.id}`);
-					return;
+					case 'Navigator':
+					case 'ModifyPage':
+					case 'CustomAnimation':
+					case 'MasterSlidesPanel':
+						this._map.sendUnoCommand(`.uno:${msg.Values.id}`);
+						return;
 				}
 			}
 			this._map.sendUnoCommand('.uno:SidebarDeck.PropertyDeck');
@@ -554,10 +549,12 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		// when user goes idle we have 'this._appLoaded == false'
 		if (msg.MessageId === 'Get_User_State') {
 			var isIdle = app.idleHandler.isDimActive();
-			this._postMessage({msgId: 'Get_User_State_Resp', args: {
-				State: (isIdle ? 'idle' : 'active'),
-				Elapsed: app.idleHandler.getElapsedFromActivity()
-			}});
+			this._postMessage({
+				msgId: 'Get_User_State_Resp', args: {
+					State: (isIdle ? 'idle' : 'active'),
+					Elapsed: app.idleHandler.getElapsedFromActivity()
+				}
+			});
 		}
 
 		// For all other messages, warn if trying to interact before we are completely loaded
@@ -602,9 +599,9 @@ window.L.Map.WOPI = window.L.Handler.extend({
 					slideNumber = this._map.getCurrentPartNumber();
 				}
 				this._map.fire('fullscreen',
-					       {
-						       startSlideNumber: slideNumber
-					       });
+					{
+						startSlideNumber: slideNumber
+					});
 			} else {
 				this._map.fire('fullscreen');
 			}
@@ -670,7 +667,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 					var image = window.L.DomUtil.create('img', '', preview);
 					image.src = msg.Values.image;
 					image.alt = msg.Values.title;
-					image.onload = function() {
+					image.onload = function () {
 						URLPopUpSection.resetPosition();
 					};
 				} else {
@@ -685,7 +682,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		}
 		else if (msg.MessageId === 'Action_InsertFile') {
 			if (msg.Values && (msg.Values.File instanceof Blob)) {
-				this._map.fire('insertfile', {file: msg.Values.File});
+				this._map.fire('insertfile', { file: msg.Values.File });
 			}
 		}
 		else if (msg.MessageId == 'Action_Paste') {
@@ -703,7 +700,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		}
 		else if (msg.MessageId === 'Action_ShowBusy') {
 			if (msg.Values && msg.Values.Label) {
-				this._map.fire('showbusy', {label: msg.Values.Label});
+				this._map.fire('showbusy', { label: msg.Values.Label });
 			}
 		}
 		else if (msg.MessageId === 'Action_HideBusy') {
@@ -718,7 +715,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 				});
 			}
 
-			this._postMessage({msgId: 'Get_Export_Formats_Resp', args: exportFormatsResp});
+			this._postMessage({ msgId: 'Get_Export_Formats_Resp', args: exportFormatsResp });
 		}
 		else if (msg.MessageId === 'Action_SaveAs') {
 			if (msg.Values) {
@@ -757,8 +754,8 @@ window.L.Map.WOPI = window.L.Handler.extend({
 			}
 		}
 		else if (msg.MessageId === 'CallPythonScript' &&
-			 Object.prototype.hasOwnProperty.call(msg, 'ScriptFile') &&
-			 Object.prototype.hasOwnProperty.call(msg, 'Function')) {
+			Object.prototype.hasOwnProperty.call(msg, 'ScriptFile') &&
+			Object.prototype.hasOwnProperty.call(msg, 'Function')) {
 			this._map.CallPythonScriptSource = e.source;
 			this._map.sendUnoCommand('vnd.sun.star.script:' + msg.ScriptFile + '$' + msg.Function + '?language=Python&location=share', msg.Values);
 		}
@@ -768,7 +765,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 			}
 		}
 		else if (msg.MessageId === 'Action_ChangeUIMode') {
-			this._map.uiManager.onChangeUIMode({mode: msg.Values.Mode, force: true});
+			this._map.uiManager.onChangeUIMode({ mode: msg.Values.Mode, force: true });
 		}
 		else if (msg.MessageId === 'Action_Mention') {
 			var list = msg.Values.list;
@@ -781,9 +778,53 @@ window.L.Map.WOPI = window.L.Handler.extend({
 				eSignature.handleSigned(msg);
 			}
 		}
+		// WordMeta: Import word metadata from JSON
+		// Format: { MessageId: 'Import_WordMeta', Values: { words: [{word, start, end, confidence}, ...] } }
+		else if (msg.MessageId === 'Import_WordMeta') {
+			if (msg.Values && msg.Values.words && this._map.wordMeta) {
+				var success = this._map.wordMeta.importFromJSON(msg.Values.words);
+				this._postMessage({
+					msgId: 'Import_WordMeta_Resp',
+					args: {
+						success: success,
+						wordCount: success ? this._map.wordMeta.getWordCount() : 0
+					}
+				});
+			} else {
+				this._postMessage({
+					msgId: 'Import_WordMeta_Resp',
+					args: { success: false, error: 'WordMeta not available or invalid data' }
+				});
+			}
+		}
+		// WordMeta: Get metadata for a specific word
+		// Format: { MessageId: 'Get_WordMeta', Values: { index: 0 } }
+		else if (msg.MessageId === 'Get_WordMeta') {
+			if (msg.Values && this._map.wordMeta) {
+				var meta = this._map.wordMeta.getWordMeta(msg.Values.index);
+				this._postMessage({
+					msgId: 'Get_WordMeta_Resp',
+					args: { index: msg.Values.index, metadata: meta }
+				});
+			}
+		}
+		// WordMeta: Navigate to word at timestamp
+		// Format: { MessageId: 'Navigate_WordTime', Values: { time: 30.5 } }
+		else if (msg.MessageId === 'Navigate_WordTime') {
+			if (msg.Values && this._map.wordMeta) {
+				var wordIndex = this._map.wordMeta.findWordByTime(msg.Values.time);
+				if (wordIndex >= 0) {
+					this._map.wordMeta.navigateToWord(wordIndex);
+				}
+				this._postMessage({
+					msgId: 'Navigate_WordTime_Resp',
+					args: { time: msg.Values.time, wordIndex: wordIndex }
+				});
+			}
+		}
 	},
 
-	_postMessage: function(e) {
+	_postMessage: function (e) {
 		if (!this.enabled) { return; }
 		var msgId = e.msgId;
 		var values = e.args || {};
@@ -805,7 +846,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		}
 	},
 
-	_postViewsMessage: function(messageId) {
+	_postViewsMessage: function (messageId) {
 		var getMembersRespVal = [];
 		for (var viewInfoIdx in this._map._viewInfo) {
 			getMembersRespVal.push({
@@ -819,7 +860,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 			});
 		}
 
-		this._postMessage({msgId: messageId, args: getMembersRespVal});
+		this._postMessage({ msgId: messageId, args: getMembersRespVal });
 	}
 });
 
