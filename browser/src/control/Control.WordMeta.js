@@ -397,10 +397,12 @@ window.L.Control.WordMeta = window.L.Control.extend({
         }
 
         if (this._useExistingBookmarks) {
+            this._log('debug', 'WordMeta: Requesting existing bookmarks with prefix ' + this.BOOKMARK_PREFIX);
             this._requestExistingBookmarks();
             return;
         }
 
+        this._log('debug', 'WordMeta: No existing bookmarks. Starting background indexing.');
         this._resetBookmarksAndIndex();
     },
 
@@ -427,11 +429,13 @@ window.L.Control.WordMeta = window.L.Control.extend({
             clearTimeout(this._existingBookmarksTimer);
         }
 
+        this._log('debug', 'WordMeta: Waiting for existing bookmark list...');
         this._existingBookmarksTimer = setTimeout(function () {
             if (that._existingBookmarksFetched) {
                 return;
             }
             that._existingBookmarksFetched = true;
+            that._log('warn', 'WordMeta: Existing bookmark list timed out. Falling back to indexing.');
             that._resetBookmarksAndIndex();
         }, this._bookmarkFetchTimeoutMs);
 
@@ -465,6 +469,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
         }
 
         if (!matched) {
+            this._log('warn', 'WordMeta: No existing WMETA bookmarks found. Indexing all words.');
             return false;
         }
 
@@ -474,6 +479,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
             this._existingBookmarksTimer = null;
         }
 
+        this._log('debug', 'WordMeta: Reused ' + Object.keys(this._bookmarksCreated).length + ' existing bookmarks.');
         this._startIndexingFromMissing();
         return true;
     },
@@ -503,6 +509,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
             }
         }
         this._indexingTargetCount = this._indexQueue.length;
+        this._log('debug', 'WordMeta: Indexing target count: ' + this._indexingTargetCount);
 
         if (this._indexQueue.length === 0) {
             this._indexingActive = false;
@@ -533,6 +540,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
         var remaining = this._indexingBatchSize;
         var that = this;
+        this._log('debug', 'WordMeta: Processing batch, remaining queue: ' + this._indexQueue.length);
 
         var processNext = function () {
             if (!that._indexingActive || token !== that._indexingToken) {
@@ -736,6 +744,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
             return;
         }
 
+        this._log('debug', 'WordMeta: Highlighting word index ' + wordIndex + ' via bookmark ' + bookmarkName);
         this._clearHighlight();
         var params = {
             'Bookmark': {
@@ -849,11 +858,24 @@ window.L.Control.WordMeta = window.L.Control.extend({
         }
 
         var missingCount = Math.max(0, this._indexingTargetCount - this._indexingDoneCount);
+        this._log('debug', 'WordMeta: Index ready. indexed=' + this._indexingDoneCount + ' missing=' + missingCount);
         this.map.fire('wordmetaindexready', {
             wordCount: this._wordMetadata.length,
             indexedCount: this._indexingDoneCount,
             missingCount: missingCount
         });
+    },
+
+    _log: function (level, message) {
+        if (app && app.console && typeof app.console[level] === 'function') {
+            app.console[level](message);
+            return;
+        }
+        if (console && typeof console[level] === 'function') {
+            console[level](message);
+        } else {
+            console.log(message);
+        }
     }
 });
 

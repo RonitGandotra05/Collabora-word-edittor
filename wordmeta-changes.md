@@ -211,6 +211,21 @@ In the parent window:
 window.addEventListener('message', (e) => console.log('MSG:', e.data));
 ```
 
+Docker logs (Collabora container):
+
+```
+docker logs -f <collabora_container_name>
+```
+
+If you use docker-compose:
+
+```
+docker compose logs -f <service_name>
+```
+
+Note: WordMeta logs are emitted from the browser client (iframe), so they will
+appear in the browser console. Use Docker logs for server-side Collabora output.
+
 ---
 
 ## 6) Known limitations
