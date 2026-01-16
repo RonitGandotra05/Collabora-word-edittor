@@ -100,15 +100,13 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
         this._cancelIndexing();
         this._wordMetadata = wordsArray.map(function (item, index) {
-            return {
+            return Object.assign({}, item, {
                 index: index,
                 word: item.word || '',
                 start: item.start || 0,      // seconds
                 end: item.end || 0,          // seconds
-                confidence: item.confidence || 1.0,
-                // Store any additional properties
-                ...item
-            };
+                confidence: item.confidence || 1.0
+            });
         });
 
         this._isLoaded = true;
