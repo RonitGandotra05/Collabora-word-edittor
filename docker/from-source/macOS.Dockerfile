@@ -69,6 +69,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # copy freshly built LOKit and Collabora Online
+COPY --from=builder /build/docker/from-source-gh-action/builddir/core /opt/lokit
 COPY --from=builder /build/docker/from-source-gh-action/instdir /
 
 # copy the shell script which can start Collabora Online (coolwsd)
