@@ -207,3 +207,5 @@ autogen.input
 
 # SBOM
 collabora-online-sbom.spdx.json
+docker/from-source/core
+docker/from-source/online

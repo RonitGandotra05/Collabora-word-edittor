@@ -43,6 +43,17 @@ echo "LOKit (core) build target: '$CORE_BUILD_TARGET'"
 
 SRCDIR=$(realpath `dirname $0`)
 INSTDIR="$SRCDIR/instdir"
+REPOROOT=$(realpath "$SRCDIR/../..")
+
+if [ "$(uname -s)" = "Darwin" ]; then
+  echo "macOS detected; building inside a Linux Docker container."
+  docker build --no-cache \
+    --build-arg COLLABORA_ONLINE_BRANCH="$COLLABORA_ONLINE_BRANCH" \
+    -t "$DOCKER_HUB_REPO:$DOCKER_HUB_TAG" \
+    -f "$SRCDIR/macOS.Dockerfile" \
+    "$REPOROOT"
+  exit $?
+fi
 
 if [ -z "$(lsb_release -si)" ]; then
   echo "WARNING: Unable to determine your distribution"
