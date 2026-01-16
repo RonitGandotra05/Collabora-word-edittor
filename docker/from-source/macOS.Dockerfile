@@ -77,8 +77,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # copy freshly built LOKit and Collabora Online
-COPY --from=builder /build/docker/from-source-gh-action/builddir/core /opt/lokit
+COPY --from=builder /build/docker/from-source-gh-action/builddir/core/instdir /opt/lokit
 COPY --from=builder /build/docker/from-source-gh-action/instdir /
+
+# Verify the LOKit files were copied correctly
+RUN echo "=== Verifying LOKit installation ===" && \
+    ls -la /opt/lokit/ && \
+    ls -la /opt/lokit/program/ | head -20 && \
+    test -f /opt/lokit/program/libmergedlo.so && echo "SUCCESS: libmergedlo.so found" || (echo "ERROR: libmergedlo.so NOT FOUND" && exit 1)
 
 # copy the shell script which can start Collabora Online (coolwsd)
 COPY docker/from-source-gh-action/start-collabora-online.sh /start-collabora-online.sh
