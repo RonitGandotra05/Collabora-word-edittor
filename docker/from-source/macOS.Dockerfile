@@ -46,6 +46,14 @@ COPY docker/from-source-gh-action /build/docker/from-source-gh-action/
 
 RUN bash /build/docker/from-source-gh-action/build.sh
 
+# Debug: Show core directory structure
+RUN echo "=== Core directory structure ===" && \
+    ls -la /build/docker/from-source-gh-action/builddir/core/ && \
+    echo "=== Looking for libmergedlo.so ===" && \
+    find /build/docker/from-source-gh-action/builddir/core -name "libmergedlo.so" 2>/dev/null || echo "NOT FOUND" && \
+    echo "=== Looking for any .so files ===" && \
+    find /build/docker/from-source-gh-action/builddir/core -name "*.so" 2>/dev/null | head -20 || echo "No .so files"
+
 # Build the final image
 FROM ubuntu:24.04
 
@@ -69,7 +77,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # copy freshly built LOKit and Collabora Online
-COPY --from=builder /build/docker/from-source-gh-action/builddir/core/instdir /opt/lokit
+COPY --from=builder /build/docker/from-source-gh-action/builddir/core /opt/lokit
 COPY --from=builder /build/docker/from-source-gh-action/instdir /
 
 # copy the shell script which can start Collabora Online (coolwsd)
