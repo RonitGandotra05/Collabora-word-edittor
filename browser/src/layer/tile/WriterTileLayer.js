@@ -1,3 +1,4 @@
+console.log("🟢 [CUSTOM MOUNT] WriterTileLayer.js loaded successfully!");
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -16,8 +17,14 @@
 window.L.WriterTileLayer = window.L.CanvasTileLayer.extend({
 
 	newAnnotation: function (commentData) {
-		const name = cool.Comment.makeName(commentData);
-		const comment = new cool.Comment(name, commentData, {}, app.sectionContainer.getSectionWithName(app.CSections.CommentList.name));
+		// Access cool namespace defensively
+		var coolNS = window.cool || (typeof cool !== 'undefined' ? cool : null);
+		if (!coolNS || !coolNS.Comment) {
+			console.warn('[WriterTileLayer] cool.Comment not available');
+			return;
+		}
+		const name = coolNS.Comment.makeName(commentData);
+		const comment = new coolNS.Comment(name, commentData, {}, app.sectionContainer.getSectionWithName(app.CSections.CommentList.name));
 
 		if (app.file.textCursor.visible) {
 			comment.sectionProperties.data.anchorPos = [app.file.textCursor.rectangle.x2, app.file.textCursor.rectangle.y1];
@@ -111,7 +118,9 @@ window.L.WriterTileLayer = window.L.CanvasTileLayer.extend({
 		if (!statusJSON.width || !statusJSON.height || this._documentInfo === textMsg)
 			return;
 
-		var sizeChanged = statusJSON.width !== app.activeDocument.fileSize.x || statusJSON.height !== app.activeDocument.fileSize.y;
+		// Defensive: handle case where fileSize might not be initialized yet
+		var currentFileSize = app.activeDocument.fileSize;
+		var sizeChanged = !currentFileSize || statusJSON.width !== currentFileSize.x || statusJSON.height !== currentFileSize.y;
 
 		if (statusJSON.viewid !== undefined) {
 			this._viewId = statusJSON.viewid;
@@ -120,8 +129,28 @@ window.L.WriterTileLayer = window.L.CanvasTileLayer.extend({
 
 		console.assert(this._viewId >= 0, 'Incorrect viewId received: ' + this._viewId);
 
+		// Get cool.SimplePoint - try global cool first (TypeScript compiled), then window.cool
+		var SimplePoint = (typeof cool !== 'undefined' && cool.SimplePoint) || (window.cool && window.cool.SimplePoint);
+		var existingFileSize = app.activeDocument.fileSize;
+		if (!SimplePoint && existingFileSize && existingFileSize.constructor) {
+			SimplePoint = existingFileSize.constructor;
+		}
 		if (sizeChanged) {
-			app.activeDocument.fileSize = new cool.SimplePoint(statusJSON.width, statusJSON.height);
+			if (SimplePoint) {
+				app.activeDocument.fileSize = new SimplePoint(statusJSON.width, statusJSON.height);
+			} else if (existingFileSize) {
+				existingFileSize.x = statusJSON.width;
+				existingFileSize.y = statusJSON.height;
+				app.activeDocument.fileSize = existingFileSize;
+			} else {
+				// Last resort: create a minimal size object to prevent blank document
+				console.warn('[WriterTileLayer] SimplePoint not available, using fallback object');
+				app.activeDocument.fileSize = {
+					x: statusJSON.width,
+					y: statusJSON.height,
+					clone: function() { return { x: this.x, y: this.y, clone: this.clone }; }
+				};
+			}
 			app.activeDocument.activeLayout.viewSize = app.activeDocument.fileSize.clone();
 
 			this._docType = statusJSON.type;
@@ -140,6 +169,10 @@ window.L.WriterTileLayer = window.L.CanvasTileLayer.extend({
 			pages: this._pages,
 			docType: this._docType
 		});
-		TileManager.resetPreFetching(true);
+		// TileManager may be defined as window.TileManager or as a global
+		var TileMgr = window.TileManager || (typeof TileManager !== 'undefined' ? TileManager : null);
+		if (TileMgr && TileMgr.resetPreFetching) {
+			TileMgr.resetPreFetching(true);
+		}
 	},
 });

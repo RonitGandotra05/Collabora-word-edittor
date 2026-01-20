@@ -76,6 +76,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
         this._indexingPaused = false;
         this._indexingTargetCount = 0;
         this._indexingDoneCount = 0;
+        this._reusedBookmarkCount = 0;
         this._existingBookmarksFetched = false;
         this._existingBookmarksTimer = null;
 
@@ -501,13 +502,16 @@ window.L.Control.WordMeta = window.L.Control.extend({
         this._lastHighlightIndex = -1;
         this._indexingDoneCount = 0;
 
+        // Count existing/reused bookmarks
+        this._reusedBookmarkCount = Object.keys(this._bookmarksCreated).length;
+
         for (var i = 0; i < this._wordMetadata.length; i++) {
             if (!this._bookmarksCreated[i]) {
                 this._indexQueue.push(i);
             }
         }
         this._indexingTargetCount = this._indexQueue.length;
-        this._log('debug', 'WordMeta: Indexing target count: ' + this._indexingTargetCount);
+        this._log('debug', 'WordMeta: Indexing target count: ' + this._indexingTargetCount + ', reused: ' + this._reusedBookmarkCount);
 
         if (this._indexQueue.length === 0) {
             this._indexingActive = false;
@@ -576,6 +580,10 @@ window.L.Control.WordMeta = window.L.Control.extend({
             if (!that._indexingActive || token !== that._indexingToken) {
                 return false;
             }
+            // Word was skipped due to special characters - silently skip
+            if (result && result.skipped) {
+                return false;
+            }
             if (!result || !result.count) {
                 console.warn('WordMeta: Indexing failed for word "' + word.word + '" at index ' + wordIndex);
                 return false;
@@ -592,6 +600,12 @@ window.L.Control.WordMeta = window.L.Control.extend({
         var that = this;
         var searchToken = this._searchToken + 1;
         this._searchToken = searchToken;
+
+        // Skip words with problematic characters that break search
+        if (this._hasProblematicChars(wordText)) {
+            this._log('debug', 'WordMeta: Skipping word with special chars: "' + wordText + '"');
+            return Promise.resolve({ skipped: true, reason: 'special_chars' });
+        }
 
         return new Promise(function (resolve) {
             var resolved = false;
@@ -626,6 +640,16 @@ window.L.Control.WordMeta = window.L.Control.extend({
                 resolve(null);
             }, that._searchTimeoutMs);
         });
+    },
+
+    /**
+     * Check if word contains characters that break the search
+     * @param {string} wordText - Text to check
+     * @returns {boolean} True if word has problematic characters
+     */
+    _hasProblematicChars: function (wordText) {
+        // Brackets and other regex special chars can break search
+        return /[\[\]{}()\\^$.*+?|]/.test(wordText);
     },
 
     _executeSearch: function (wordText, overrideStartPoint) {
@@ -781,6 +805,12 @@ window.L.Control.WordMeta = window.L.Control.extend({
         var token = this._highlightSearchToken + 1;
         this._highlightSearchToken = token;
 
+        // Skip search for words with problematic characters
+        if (this._hasProblematicChars(wordText)) {
+            this._log('debug', 'WordMeta: Skipping highlight search for word with special chars: "' + wordText + '"');
+            return Promise.resolve({ skipped: true, reason: 'special_chars' });
+        }
+
         return new Promise(function (resolve) {
             var resolved = false;
 
@@ -855,11 +885,14 @@ window.L.Control.WordMeta = window.L.Control.extend({
             return;
         }
 
+        // Include reused bookmarks in the indexed count
+        var reusedCount = this._reusedBookmarkCount || 0;
+        var totalIndexed = reusedCount + this._indexingDoneCount;
         var missingCount = Math.max(0, this._indexingTargetCount - this._indexingDoneCount);
-        this._log('debug', 'WordMeta: Index ready. indexed=' + this._indexingDoneCount + ' missing=' + missingCount);
+        this._log('debug', 'WordMeta: Index ready. reused=' + reusedCount + ' newlyIndexed=' + this._indexingDoneCount + ' missing=' + missingCount);
         this.map.fire('wordmetaindexready', {
             wordCount: this._wordMetadata.length,
-            indexedCount: this._indexingDoneCount,
+            indexedCount: totalIndexed,
             missingCount: missingCount
         });
     },
