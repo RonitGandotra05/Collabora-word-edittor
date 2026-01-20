@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  collabora:
+    image: collabora/code:25.04.8.1.1
+    container_name: collabora-code
+    restart: always
+    ports:
+      - "9980:9980"
+    environment:
+      # Allow connections from Flask server running on host
+      - aliasgroup1=http://host.docker.internal:8000
+      # Admin console credentials
+      - username=admin
+      - password=admin123
+      # Disable SSL for local development (enable in production!)
+      - extra_params=--o:ssl.enable=false --o:ssl.termination=false
+      # Spell check dictionaries
+      - dictionaries=en_GB en_US
+    cap_add:
+      - MKNOD
+    extra_hosts:
+      # Enable container to reach host machine
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Mount your modified browser dist folder over the container's
+      - ./browser/dist:/usr/share/coolwsd/browser/dist
