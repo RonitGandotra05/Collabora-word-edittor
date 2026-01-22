@@ -783,19 +783,16 @@ window.L.Control.WordMeta = window.L.Control.extend({
         setTimeout(function () {
             that.map.sendUnoCommand('.uno:SelectWord', null, true);
             setTimeout(function () {
-                if (that._hasTextSelection()) {
-                    that._highlightSearchActive = false;
-                    that._hasActiveHighlight = true;
-                    that._resumeIndexing();
-                    return;
+                // Always mark as complete after SelectWord attempt
+                // DO NOT fallback to text search - it highlights ALL occurrences of the word
+                // which causes duplicate words to highlight simultaneously
+                that._highlightSearchActive = false;
+                that._hasActiveHighlight = that._hasTextSelection();
+                that._resumeIndexing();
+                
+                if (!that._hasActiveHighlight) {
+                    that._log('debug', 'WordMeta: SelectWord did not create selection for index ' + wordIndex + ', but NOT falling back to text search to avoid multi-highlight bug');
                 }
-
-                var startPoint = that._getCursorSearchStartPoint();
-                that._searchForHighlight(word.word, startPoint).then(function () {
-                    that._highlightSearchActive = false;
-                    that._hasActiveHighlight = true;
-                    that._resumeIndexing();
-                });
             }, that._highlightJumpDelayMs);
         }, this._highlightJumpDelayMs);
     },
@@ -851,13 +848,17 @@ window.L.Control.WordMeta = window.L.Control.extend({
     },
 
     _clearHighlight: function () {
-        if (!this._hasActiveHighlight) {
-            return;
-        }
+        // Always clear search results to prevent lingering highlights from previous operations
+        // This fixes the bug where multiple instances of the same word stay highlighted
         if (app && app.searchService && typeof app.searchService.resetSelection === 'function') {
             app.searchService.resetSelection();
-        } else if (app && app.activeDocument && app.activeDocument.activeView) {
+        }
+        if (app && app.activeDocument && app.activeDocument.activeView) {
             app.activeDocument.activeView.clearTextSelection();
+        }
+        // Also clear via map fire to ensure all highlight overlays are removed
+        if (this.map) {
+            this.map.fire('clearselection');
         }
         this._hasActiveHighlight = false;
     },
