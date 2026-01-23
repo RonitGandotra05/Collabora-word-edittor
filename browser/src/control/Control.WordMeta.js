@@ -154,23 +154,67 @@ window.L.Control.WordMeta = window.L.Control.extend({
         // Binary search for the word at this timestamp
         var left = 0;
         var right = this._wordMetadata.length - 1;
-        var result = -1;
 
         while (left <= right) {
             var mid = Math.floor((left + right) / 2);
             var word = this._wordMetadata[mid];
+
+            // Skip words without valid timestamps (speaker labels, Q&A markers, etc.)
+            // These are NOT spoken words and should never be highlighted
+            if (!this._hasValidTimestamp(word)) {
+                // Move to next word
+                left = mid + 1;
+                continue;
+            }
 
             if (timeSeconds >= word.start && timeSeconds <= word.end) {
                 return mid;
             } else if (timeSeconds < word.start) {
                 right = mid - 1;
             } else {
-                result = mid; // Keep track of last word before this time
+                // Time is after this word's end
+                // DON'T return this word - only return if time is WITHIN a word's range
                 left = mid + 1;
             }
         }
 
-        return result;
+        // No word found at this exact time - return -1 instead of the last word
+        // This prevents highlighting from persisting during gaps between words
+        return -1;
+    },
+
+    /**
+     * Check if a word has valid timestamps (is an actual spoken word, not a speaker label)
+     * @param {Object} word - Word metadata object
+     * @returns {boolean} True if word has valid start and end timestamps
+     */
+    _hasValidTimestamp: function (word) {
+        if (!word) return false;
+        
+        // Check for valid numeric timestamps
+        var hasStart = typeof word.start === 'number' && isFinite(word.start) && word.start >= 0;
+        var hasEnd = typeof word.end === 'number' && isFinite(word.end) && word.end >= 0;
+        
+        // Word must have both start and end, and end must be > start
+        if (!hasStart || !hasEnd || word.end <= word.start) {
+            return false;
+        }
+        
+        // Skip known non-spoken markers (speaker labels, Q&A markers, etc.)
+        var wordText = (word.word || '').trim();
+        if (!wordText) return false;
+        
+        // Skip Q&A markers like "[Q&A", "Started]", "Stopped]"
+        if (wordText.match(/^\[Q&A$|^Started\]$|^Stopped\]$|^\[.*\]$/i)) {
+            return false;
+        }
+        
+        // Skip speaker labels like "MR", "MR.", "MS", "MS.", or speaker names ending with ":"
+        if (wordText.match(/^(MR|MS|MRS|DR)\.?$/i) || wordText.endsWith(':')) {
+            return false;
+        }
+        
+        return true;
     },
 
     /**
