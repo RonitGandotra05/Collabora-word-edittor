@@ -55,6 +55,8 @@ window.L.Control.WordMeta = window.L.Control.extend({
     _existingBookmarksFetched: false,
     _existingBookmarksTimer: null,
     _bookmarkFetchTimeoutMs: 1500,
+    // When false, do not create any new bookmarks during initial load.
+    _autoCreateBookmarksOnLoad: false,
 
     // Bookmark naming prefix
     BOOKMARK_PREFIX: 'WMETA_',
@@ -445,6 +447,12 @@ window.L.Control.WordMeta = window.L.Control.extend({
             return;
         }
 
+        if (!this._autoCreateBookmarksOnLoad) {
+            this._log('debug', 'WordMeta: Auto-creation disabled. Skipping background indexing.');
+            this._resetBookmarksAndIndex();
+            return;
+        }
+
         this._log('debug', 'WordMeta: No existing bookmarks. Starting background indexing.');
         this._resetBookmarksAndIndex();
     },
@@ -478,7 +486,13 @@ window.L.Control.WordMeta = window.L.Control.extend({
                 return;
             }
             that._existingBookmarksFetched = true;
-            that._log('warn', 'WordMeta: Existing bookmark list timed out. Falling back to indexing.');
+            if (that._autoCreateBookmarksOnLoad) {
+                that._log('warn', 'WordMeta: Existing bookmark list timed out. Falling back to indexing.');
+                that._resetBookmarksAndIndex();
+                return;
+            }
+
+            that._log('warn', 'WordMeta: Existing bookmark list timed out. Auto-creation disabled.');
             that._resetBookmarksAndIndex();
         }, this._bookmarkFetchTimeoutMs);
 
@@ -512,7 +526,18 @@ window.L.Control.WordMeta = window.L.Control.extend({
         }
 
         if (!matched) {
-            this._log('warn', 'WordMeta: No existing WMETA bookmarks found. Indexing all words.');
+            if (this._autoCreateBookmarksOnLoad) {
+                this._log('warn', 'WordMeta: No existing WMETA bookmarks found. Indexing all words.');
+                return false;
+            }
+
+            this._log('warn', 'WordMeta: No existing WMETA bookmarks found. Auto-creation disabled.');
+            this._existingBookmarksFetched = true;
+            if (this._existingBookmarksTimer) {
+                clearTimeout(this._existingBookmarksTimer);
+                this._existingBookmarksTimer = null;
+            }
+            this._startIndexingFromMissing();
             return false;
         }
 
@@ -528,6 +553,12 @@ window.L.Control.WordMeta = window.L.Control.extend({
     },
 
     _resetBookmarksAndIndex: function () {
+        if (!this._autoCreateBookmarksOnLoad) {
+            this._bookmarksCreated = {};
+            this._startIndexingFromMissing();
+            return;
+        }
+
         this._deleteAllBookmarks();
         this._bookmarksCreated = {};
         this._startIndexingFromMissing();
@@ -548,6 +579,15 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
         // Count existing/reused bookmarks
         this._reusedBookmarkCount = Object.keys(this._bookmarksCreated).length;
+
+        if (!this._autoCreateBookmarksOnLoad) {
+            this._indexingActive = false;
+            this._indexingTargetCount = Math.max(0, this._wordMetadata.length - this._reusedBookmarkCount);
+            this._indexingDoneCount = 0;
+            console.log('WordMeta: Auto-creation disabled - using only ' + this._reusedBookmarkCount + ' existing bookmarks (' + this._indexingTargetCount + ' words have no bookmark)');
+            this._emitIndexReady();
+            return;
+        }
 
         for (var i = 0; i < this._wordMetadata.length; i++) {
             if (!this._bookmarksCreated[i]) {
