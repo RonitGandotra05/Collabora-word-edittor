@@ -12,6 +12,8 @@
  * L.WOPI contains WOPI related logic
  */
 
+console.log("🟢 [CUSTOM MOUNT] Map.WOPI.js loaded - overriding bundled WOPI handler");
+
 /* global _ app _UNO JSDialog errorMessages URLPopUpSection */
 window.L.Map.WOPI = window.L.Handler.extend({
 	// If the CheckFileInfo call fails on server side, we won't have any PostMessageOrigin.
@@ -58,6 +60,12 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 	initialize: function (map) {
 		this._map = map;
+		if (!this._map._hotkeyMode) {
+			this._map._hotkeyMode = { enabled: false, hotkeys: {} };
+		}
+		if (!this._map._speakerIndent) {
+			this._map._speakerIndent = null;
+		}
 	},
 
 	addHooks: function () {
@@ -75,6 +83,32 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		window.L.DomEvent.on(window, 'message', this._postMessageListener, this);
 
 		this._map.on('updateviewslist', function () { this._postViewsMessage('Views_List'); }, this);
+
+		// Document-level hotkey interceptor - captures keys before TextInput gets them
+		var that = this;
+		this._hotkeyInterceptor = function (ev) {
+			var hotkeyMode = that._map && that._map._hotkeyMode;
+			if (!hotkeyMode || !hotkeyMode.enabled) return;
+
+			var key = (ev.key && ev.key.length === 1) ? ev.key.toLowerCase() : '';
+			if (key && hotkeyMode.hotkeys && hotkeyMode.hotkeys[key]) {
+				console.log('[Map.WOPI] Hotkey intercepted:', key);
+				ev.preventDefault();
+				ev.stopPropagation();
+				ev.stopImmediatePropagation();
+				that._map.fire('postMessage', { msgId: 'Hotkey_Pressed', args: { key: key } });
+				return false;
+			}
+			if (ev.key === 'Escape') {
+				console.log('[Map.WOPI] Escape pressed, exiting hotkey mode');
+				ev.preventDefault();
+				ev.stopPropagation();
+				that._map.fire('postMessage', { msgId: 'Hotkey_Mode_Exit', args: {} });
+				return false;
+			}
+		};
+		// Use capture phase to intercept before bubbling to TextInput
+		document.addEventListener('keydown', this._hotkeyInterceptor, true);
 
 		if (!window.ThisIsAMobileApp) {
 			// override the window.open to issue a postMessage, so that
@@ -117,6 +151,12 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		window.L.DomEvent.off(window, 'message', this._postMessageListener, this);
 
 		this._map.off('updateviewslist');
+
+		// Remove hotkey interceptor
+		if (this._hotkeyInterceptor) {
+			document.removeEventListener('keydown', this._hotkeyInterceptor, true);
+			this._hotkeyInterceptor = null;
+		}
 	},
 
 	// Return whether there is the capability to rename, not the permission.
@@ -342,6 +382,287 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		// allow closing documents before they are completely loaded
 		if (msg.MessageId === 'Close_Session') {
 			app.socket.sendMessage('closedocument');
+			return;
+		}
+		if (msg.MessageId === 'Capture_Speaker_Indent') {
+			var style = null;
+			var margin = null;
+			var wantAuto = !!(msg.Values && msg.Values.auto);
+			if (!wantAuto && this._map && this._map['stateChangeHandler']) {
+				style = this._map['stateChangeHandler'].getItemValue('.uno:StyleApply');
+				margin = this._map['stateChangeHandler'].getItemValue('.uno:LeftRightParaMargin');
+			}
+			if (wantAuto) {
+				console.log('[SpeakerIndent] Starting auto speaker detection...');
+				var that = this;
+				var token = Date.now();
+				var attempts = 0;
+				var maxAttempts = 8;
+				this._map._speakerIndentToken = token;
+				var cleanup = function () {
+					that._map.off('search', onSearch, that);
+				};
+				var finalize = function (s, m, autoFlag, lineText, isTimestamp, isSpeaker, lineSource, attemptCount) {
+					var speakerName = extractSpeakerName(lineText);
+					console.log('[SpeakerIndent] ✅ FINALIZED', {
+						speakerName: speakerName,
+						style: s,
+						margin: m,
+						lineText: lineText ? lineText.substring(0, 50) : '',
+						isTimestamp: isTimestamp,
+						isSpeaker: isSpeaker,
+						lineSource: lineSource,
+						attempts: attemptCount
+					});
+					that._map._speakerIndent = { style: s, margin: m };
+					that._map.fire('postMessage', {
+						msgId: 'Speaker_Indent_Resp',
+						args: {
+							style: s,
+							margin: m,
+							auto: autoFlag,
+							lineText: lineText,
+							isTimestamp: isTimestamp,
+							isSpeaker: isSpeaker,
+							lineSource: lineSource,
+							attempts: attemptCount,
+							speakerName: speakerName
+						}
+					});
+				};
+				var getSelectionLineText = function () {
+					try {
+						var sel = window.getSelection && window.getSelection();
+						if (!sel || !sel.anchorNode) return '';
+						var node = sel.anchorNode;
+						if (node.nodeType === 3) node = node.parentElement || node;
+						if (!node || !node.textContent) return '';
+						return node.textContent;
+					} catch (e) {
+						return '';
+					}
+				};
+				var getSearchResultLineText = function () {
+					try {
+						var map = window.L && window.L.Map && window.L.Map.THIS;
+						var docLayer = map && map._docLayer;
+						var res = docLayer && docLayer._lastSearchResult;
+						if (!res) return '';
+						var text =
+							res.text ||
+							res.textString ||
+							res.selectedText ||
+							res.selectedTextString ||
+							res.searchString ||
+							'';
+						return text || '';
+					} catch (e) {
+						return '';
+					}
+				};
+				var getClipLineText = function () {
+					try {
+						var cached = that._map && that._map._lastSelectionPlainText;
+						if (cached) {
+							return cached.replace(/\r/g, '').split('\n')[0];
+						}
+						var clip = that._map && that._map._clip;
+						var text = clip && clip._selectionPlainTextContent ? clip._selectionPlainTextContent : '';
+						if (!text) return '';
+						text = text.replace(/\r/g, '').split('\n')[0];
+						return text;
+					} catch (e) {
+						return '';
+					}
+				};
+				var selectParagraphForSelection = function () {
+					try {
+						if (that._map && typeof that._map.sendUnoCommand === 'function') {
+							that._map.sendUnoCommand('.uno:StartOfPara');
+							that._map.sendUnoCommand('.uno:EndOfParaSel');
+						}
+					} catch (e) {
+						// ignore
+					}
+				};
+				var pendingTextCallback = null;
+				var requestSelectionText = function (callback) {
+					try {
+						// Clear previous text
+						if (that._map) {
+							that._map._lastSelectionPlainText = '';
+						}
+						if (that._map && that._map._clip) {
+							that._map._clip._selectionPlainTextContent = '';
+						}
+						console.log('[SpeakerIndent] Selecting paragraph and requesting text...');
+						selectParagraphForSelection();
+
+						// Give UNO commands time to complete before requesting text
+						window.setTimeout(function () {
+							console.log('[SpeakerIndent] Sending gettextselection request...');
+							app.socket.sendMessage('gettextselection mimetype=text/plain;charset=utf-8');
+
+							// Poll for the text to arrive
+							var pollCount = 0;
+							var maxPolls = 20; // 20 x 50ms = 1 second max wait
+							var pollForText = function () {
+								pollCount++;
+								var text = that._map._lastSelectionPlainText || '';
+								if (!text && that._map._clip) {
+									text = that._map._clip._selectionPlainTextContent || '';
+								}
+								// Only log every 5 polls to reduce noise
+								if (pollCount % 5 === 0 || pollCount === 1) {
+									console.log('[SpeakerIndent] Poll ' + pollCount + '/' + maxPolls + ', text:', text ? text.substring(0, 30) : '(empty)');
+								}
+
+								if (text) {
+									// Got text! Extract first line
+									var firstLine = text.replace(/\r/g, '').split('\n')[0];
+									console.log('[SpeakerIndent] ✓ Got text:', firstLine.substring(0, 50));
+									if (callback) callback(firstLine);
+								} else if (pollCount < maxPolls) {
+									window.setTimeout(pollForText, 50);
+								} else {
+									console.log('[SpeakerIndent] ✗ Polling timed out, no text received');
+									if (callback) callback('');
+								}
+							};
+							// Start polling after a short delay
+							window.setTimeout(pollForText, 100);
+						}, 100);
+					} catch (e) {
+						console.log('[SpeakerIndent] Error in requestSelectionText:', e);
+						if (callback) callback('');
+					}
+				};
+				var getLineText = function () {
+					var fromClip = getClipLineText();
+					if (fromClip) return { text: fromClip, source: 'clip' };
+					var fromSelection = getSelectionLineText();
+					if (fromSelection) return { text: fromSelection, source: 'selection' };
+					var fromSearch = getSearchResultLineText();
+					if (fromSearch) return { text: fromSearch, source: 'search' };
+					return { text: '', source: 'none' };
+				};
+				var isTimestampSelection = function (lineText) {
+					if (!lineText) return false;
+					return /^\s*\d{1,2}:\d{2}:\d{2}\b/.test(lineText);
+				};
+				var isSpeakerLine = function (lineText) {
+					if (!lineText) return false;
+					return /^[^a-z]*[A-Z][A-Z .]*:/.test(lineText);
+				};
+				var extractSpeakerName = function (lineText) {
+					if (!lineText) return null;
+					var match = lineText.match(/^[^a-z]*([A-Z][A-Z .]*?):/);
+					return match ? match[1].trim() : null;
+				};
+				var advanceSearch = function () {
+					if (app.searchService && typeof app.searchService.search === 'function') {
+						app.searchService.search(':', false, '', 0, true);
+						return true;
+					}
+					return false;
+				};
+				var processLineText = function (lineText) {
+					var s = null;
+					var m = null;
+					if (that._map && that._map['stateChangeHandler']) {
+						s = that._map['stateChangeHandler'].getItemValue('.uno:StyleApply');
+						m = that._map['stateChangeHandler'].getItemValue('.uno:LeftRightParaMargin');
+					}
+					attempts += 1;
+					var isTs = isTimestampSelection(lineText);
+					var isSpeaker = isSpeakerLine(lineText);
+					var speakerName = extractSpeakerName(lineText);
+					console.log('[SpeakerIndent] Attempt ' + attempts + '/' + maxAttempts, {
+						lineText: lineText ? lineText.substring(0, 50) : '',
+						isTimestamp: isTs,
+						isSpeaker: isSpeaker,
+						speakerName: speakerName,
+						style: s
+					});
+
+					// If we have a non-default style and found a colon via search, accept it
+					// even if we couldn't get the text to verify (text retrieval is unreliable)
+					if (s && s !== 'Default Paragraph Style') {
+						// If we have text, verify it's not a timestamp
+						if (lineText && isTs) {
+							console.log('[SpeakerIndent] Skipping timestamp line, advancing search...');
+							if (attempts < maxAttempts && advanceSearch()) {
+								return;
+							}
+						} else {
+							// Accept this style - either text confirms speaker or we trust the search found ':'
+							console.log('[SpeakerIndent] ✅ Found valid speaker style!', { speakerName: speakerName || '(unknown)', style: s });
+							cleanup();
+							finalize(s, m, true, lineText, isTs, isSpeaker || !lineText, 'search', attempts);
+							return;
+						}
+					}
+
+					// Style is default or not available - try next search result
+					if (attempts < maxAttempts && advanceSearch()) {
+						console.log('[SpeakerIndent] Style is default or unavailable, advancing search...');
+						return;
+					}
+
+					console.log('[SpeakerIndent] ⚠️ Max attempts reached or no valid speaker style found');
+					cleanup();
+					finalize(null, null, true, lineText, isTs, isSpeaker, 'search', attempts);
+				};
+				var onSearch = function (e) {
+					if (that._map._speakerIndentToken !== token) return;
+					if (!e || e.originalPhrase !== ':') return;
+					console.log('[SpeakerIndent] Search found ":" match, requesting selection text...');
+					requestSelectionText(function (text) {
+						processLineText(text);
+					});
+				};
+				this._map.on('search', onSearch, this);
+				console.log('[SpeakerIndent] Starting document search for ":"...');
+				if (app.searchService && typeof app.searchService.search === 'function') {
+					app.searchService.search(':', false);
+				}
+				window.setTimeout(function () {
+					if (that._map._speakerIndentToken !== token) return;
+					cleanup();
+					var lineInfo = getLineText();
+					var lineText = lineInfo.text;
+					var isTs = isTimestampSelection(lineText);
+					var isSpeaker = isSpeakerLine(lineText);
+					finalize(null, null, true, lineText, isTs, isSpeaker, lineInfo.source, attempts);
+				}, 1500);
+				return;
+			}
+			this._map._speakerIndent = { style: style, margin: margin };
+			this._map.fire('postMessage', {
+				msgId: 'Speaker_Indent_Resp',
+				args: { style: style, margin: margin }
+			});
+			return;
+		}
+		if (msg.MessageId === 'Hotkey_Mode_Config') {
+			if (!msg.Values) {
+				window.app.console.error('Property "Values" not set');
+				return;
+			}
+			var enabled = !!msg.Values.enabled;
+			var hotkeys = Array.isArray(msg.Values.hotkeys) ? msg.Values.hotkeys : [];
+			var hotkeyMap = {};
+			for (var i = 0; i < hotkeys.length; i++) {
+				var key = hotkeys[i];
+				if (typeof key === 'string' && key.length) {
+					hotkeyMap[key.toLowerCase()] = true;
+				}
+			}
+			this._map._hotkeyMode = { enabled: enabled, hotkeys: hotkeyMap };
+			this._map.fire('postMessage', {
+				msgId: 'Hotkey_Mode_Config_Resp',
+				args: { enabled: enabled, hotkeyCount: Object.keys(hotkeyMap).length }
+			});
 			return;
 		}
 
@@ -885,3 +1206,25 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 // This handler would only get 'enabled' by map if map.options.wopi = true
 window.L.Map.addInitHook('addHandler', 'wopi', window.L.Map.WOPI);
+
+// Re-register on existing map if it exists (for custom script override after bundle.js)
+(function () {
+	var existingMap = window.L && window.L.Map && window.L.Map.THIS;
+	if (existingMap && existingMap.wopi) {
+		console.log('[Map.WOPI] Replacing existing WOPI handler on map...');
+		// Disable old handler
+		if (existingMap.wopi.disable) {
+			existingMap.wopi.disable();
+		}
+		// Remove old handler
+		delete existingMap.wopi;
+		// Create and enable new handler
+		existingMap.wopi = new window.L.Map.WOPI(existingMap);
+		if (existingMap.options && existingMap.options.wopi) {
+			existingMap.wopi.enable();
+		}
+		console.log('[Map.WOPI] WOPI handler replaced successfully!');
+	} else {
+		console.log('[Map.WOPI] No existing map found, handler will be added via addInitHook');
+	}
+})();

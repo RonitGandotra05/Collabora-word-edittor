@@ -934,6 +934,11 @@ window.L.CanvasTileLayer = window.L.Layer.extend({
 
 			if (this._map._clip) {
 				this._map._clip.setTextSelectionHTML(textMsgHtml, textMsgPlainText);
+				this._map._lastSelectionPlainText = textMsgPlainText || '';
+				this._map.fire('textselectioncontent', {
+					plainText: textMsgPlainText || '',
+					html: textMsgHtml || ''
+				});
 			} else
 				// hack for ios and android to get selected text into hyperlink insertion dialog
 				this._selectedTextContent = textMsgHtml;
