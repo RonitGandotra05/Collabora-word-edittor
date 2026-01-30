@@ -15,6 +15,8 @@ When you make changes to custom source files, run this to apply them:
 cp ./browser/src/map/handler/Map.WOPI.js ./browser/dist/src/map/handler/Map.WOPI.js && \
 cp ./browser/src/layer/tile/WriterTileLayer.js ./browser/dist/src/layer/tile/WriterTileLayer.js && \
 cp ./browser/src/control/Control.WordMeta.js ./browser/dist/src/control/Control.WordMeta.js && \
+cp ./browser/src/layer/marker/TextInput.js ./browser/dist/src/layer/marker/TextInput.js && \
+cp ./browser/src/app/ServerConnectionService.ts ./browser/dist/src/app/ServerConnectionService.ts && \
 docker-compose restart collabora
 ```
 
@@ -63,15 +65,24 @@ mv ./browser/dist_fresh ./browser/dist
 Copy your custom/modified source files into the new `dist/src` directory.
 
 ```bash
-# Copy all custom JavaScript files
+# Create required directories (if not present)
+mkdir -p ./browser/dist/src/map/handler
+mkdir -p ./browser/dist/src/layer/marker
+mkdir -p ./browser/dist/src/app
+
+# Copy all custom JavaScript/TypeScript files
 cp ./browser/src/map/handler/Map.WOPI.js ./browser/dist/src/map/handler/
 cp ./browser/src/layer/tile/WriterTileLayer.js ./browser/dist/src/layer/tile/
 cp ./browser/src/control/Control.WordMeta.js ./browser/dist/src/control/
+cp ./browser/src/layer/marker/TextInput.js ./browser/dist/src/layer/marker/
+cp ./browser/src/app/ServerConnectionService.ts ./browser/dist/src/app/
 
 # Verify copies
 ls -la ./browser/dist/src/map/handler/Map.WOPI.js
 ls -la ./browser/dist/src/layer/tile/WriterTileLayer.js
 ls -la ./browser/dist/src/control/Control.WordMeta.js
+ls -la ./browser/dist/src/layer/marker/TextInput.js
+ls -la ./browser/dist/src/app/ServerConnectionService.ts
 ```
 
 ### 5. Restart the Container
@@ -115,6 +126,8 @@ These files are loaded as separate scripts after `bundle.js` in `cool.html`, so 
 | `browser/src/map/handler/Map.WOPI.js` | PostMessage handling, speaker detection, hotkey interception |
 | `browser/src/layer/tile/WriterTileLayer.js` | Writer-specific tile layer customizations |
 | `browser/src/control/Control.WordMeta.js` | Word metadata control for timestamps |
+| `browser/src/layer/marker/TextInput.js` | Keyboard input handling |
+| `browser/src/app/ServerConnectionService.ts` | Server connection and WebSocket handling |
 
 **To apply changes:**
 ```bash
@@ -128,12 +141,9 @@ These files are compiled into `bundle.js` and cannot be simply replaced:
 
 | File | Description |
 |------|-------------|
-| `browser/src/layer/marker/TextInput.js` | Keyboard input handling |
 | `browser/src/layer/tile/CanvasTileLayer.js` | Base canvas tile layer |
 
 **To apply changes:** Requires rebuilding the entire Collabora frontend (complex, not recommended for development).
-
-**Workaround:** For hotkey interception, we added a document-level keyboard interceptor in `Map.WOPI.js` instead of modifying `TextInput.js`.
 
 ---
 
@@ -145,6 +155,8 @@ The file `browser/dist/cool.html` includes these script tags after `bundle.js`:
 <script defer src="src/layer/tile/WriterTileLayer.js"></script>
 <script defer src="src/map/handler/Map.WOPI.js"></script>
 <script defer src="src/control/Control.WordMeta.js"></script>
+<script defer src="src/layer/marker/TextInput.js"></script>
+<script defer src="src/app/ServerConnectionService.ts"></script>
 ```
 
 These scripts override the bundled versions by redefining the Leaflet/Map components.
