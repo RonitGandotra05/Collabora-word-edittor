@@ -1264,30 +1264,88 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
     /**
      * Get or create the container for paragraph markers
+     * Container uses fixed positioning and tracks scroll to update marker positions
      */
     _getOrCreateMarkerContainer: function () {
         var containerId = 'wordmeta-paragraph-markers';
         var container = document.getElementById(containerId);
 
         if (!container) {
-            // Try to find the document container in Collabora
-            var docContainer = document.getElementById('document-container') ||
-                document.querySelector('.leaflet-map-pane') ||
-                document.querySelector('#map');
-
+            // Find the document container to position markers relative to
+            var docContainer = document.getElementById('document-container');
             if (!docContainer) {
-                console.warn('[WordMeta] Could not find document container for markers');
+                console.warn('[WordMeta] Could not find document-container');
                 return null;
             }
 
             container = document.createElement('div');
             container.id = containerId;
-            container.style.cssText = 'position: absolute; left: 0; top: 0; width: 40px; height: 100%; pointer-events: auto; z-index: 1000;';
-            docContainer.appendChild(container);
-            console.log('[WordMeta] Created marker container');
+            // Fixed position, will be updated relative to document container
+            container.style.cssText = 'position: fixed; left: 0; top: 0; width: 50px; height: 100vh; pointer-events: none; z-index: 99999; overflow: visible;';
+            document.body.appendChild(container);
+            console.log('[WordMeta] Created marker container at body level');
+
+            // Store initial position for reference
+            var rect = docContainer.getBoundingClientRect();
+            this._docContainerLeft = rect.left;
+            this._docContainerTop = rect.top;
+
+            // Set up scroll listener
+            this._setupScrollListener();
         }
 
         return container;
+    },
+
+    /**
+     * Set up scroll listener to update marker positions
+     */
+    _setupScrollListener: function () {
+        var that = this;
+        var mapPane = document.querySelector('.leaflet-map-pane');
+        if (!mapPane) return;
+
+        // Use MutationObserver to track transform changes
+        var observer = new MutationObserver(function () {
+            that._updateMarkerPositions();
+        });
+        observer.observe(mapPane, { attributes: true, attributeFilter: ['style'] });
+        this._scrollObserver = observer;
+        console.log('[WordMeta] Scroll listener set up');
+    },
+
+    /**
+     * Update all marker positions based on current scroll state
+     */
+    _updateMarkerPositions: function () {
+        if (!this._paragraphMarkers || !this._markerBasePositions) return;
+
+        var mapPane = document.querySelector('.leaflet-map-pane');
+        if (!mapPane) return;
+
+        // Extract translate Y from transform
+        var transform = mapPane.style.transform || '';
+        var translateY = 0;
+        var translateX = 0;
+        var match = transform.match(/translate3d\(([^,]+)px,\s*([^,]+)px/);
+        if (match) {
+            translateX = parseFloat(match[1]) || 0;
+            translateY = parseFloat(match[2]) || 0;
+        }
+
+        var docContainer = document.getElementById('document-container');
+        var containerRect = docContainer ? docContainer.getBoundingClientRect() : { left: 0, top: 0 };
+
+        // Update each marker position
+        for (var i = 0; i < this._paragraphMarkers.length; i++) {
+            var marker = this._paragraphMarkers[i];
+            var baseY = this._markerBasePositions[i] || 0;
+
+            // Calculate screen position: base position + transform offset + container offset
+            var screenY = baseY + translateY + containerRect.top;
+            marker.style.top = screenY + 'px';
+            marker.style.left = (containerRect.left + 10) + 'px';
+        }
     },
 
     /**
@@ -1301,12 +1359,12 @@ window.L.Control.WordMeta = window.L.Control.extend({
         marker.setAttribute('data-word-index', wordIndex);
         marker.setAttribute('data-timestamp', word.start);
 
-        // Style the marker
-        marker.style.cssText = 'position: absolute; left: 5px; width: 24px; height: 24px; ' +
+        // Style the marker - using fixed positioning, position will be set dynamically
+        marker.style.cssText = 'position: fixed; left: 10px; top: 0; width: 28px; height: 28px; ' +
             'background: rgba(124, 77, 255, 0.9); border-radius: 50%; cursor: pointer; ' +
             'display: flex; align-items: center; justify-content: center; ' +
-            'box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.2s, background 0.2s; ' +
-            'font-size: 12px; color: white; font-weight: bold;';
+            'box-shadow: 0 2px 4px rgba(0,0,0,0.3); transition: top 0.1s ease-out, background 0.2s; ' +
+            'font-size: 14px; color: white; font-weight: bold; pointer-events: auto;';
 
         // Add play icon (▶)
         marker.innerHTML = '▶';
@@ -1333,20 +1391,126 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
     /**
      * Position paragraph markers based on word positions in the document
+     * Uses bookmark positions to align markers with actual paragraph starts
      */
     _positionParagraphMarkers: function () {
         console.log('[WordMeta] Positioning', this._paragraphMarkers.length, 'markers');
 
         var that = this;
-        var yOffset = 0;
 
-        this._paragraphMarkers.forEach(function (marker, index) {
-            // For now, use a simple stacked layout
-            // TODO: Query actual word positions from bookmark locations
-            var topPosition = 100 + (index * 80); // 80px apart
-            marker.style.top = topPosition + 'px';
-            console.log('[WordMeta] Marker', index, 'positioned at y=' + topPosition);
-        });
+        // Get the document container to get its bounds
+        var docContainer = document.getElementById('document-container') ||
+            document.querySelector('.leaflet-tile-pane') ||
+            document.querySelector('#map');
+
+        if (!docContainer) {
+            console.warn('[WordMeta] Could not find document container for marker positioning');
+            return;
+        }
+
+        // Get the canvas tiles container for more accurate positioning
+        var tilesPane = document.querySelector('.leaflet-tile-pane');
+        var canvasFrame = document.querySelector('#canvas-container') ||
+            document.querySelector('.leaflet-map-pane');
+
+        // Position markers by querying bookmark positions sequentially
+        this._positionMarkersSequentially(0);
+    },
+
+    /**
+     * Position markers one by one by jumping to each bookmark
+     */
+    _positionMarkersSequentially: function (index) {
+        // Initialize base positions array on first call
+        if (index === 0) {
+            this._markerBasePositions = [];
+        }
+
+        if (index >= this._paragraphMarkers.length) {
+            console.log('[WordMeta] All', this._paragraphMarkers.length, 'markers positioned');
+            // After all markers positioned, update their screen positions and scroll back to top
+            this._updateMarkerPositions();
+            this.map.sendUnoCommand('.uno:GoToStartOfDoc');
+            return;
+        }
+
+        var that = this;
+        var marker = this._paragraphMarkers[index];
+        var wordIndex = parseInt(marker.getAttribute('data-word-index'), 10);
+        var bookmarkName = this._bookmarksCreated[wordIndex];
+
+        if (!bookmarkName) {
+            console.warn('[WordMeta] No bookmark for marker', index, 'wordIndex:', wordIndex);
+            // Use fallback position
+            marker.style.top = (100 + index * 80) + 'px';
+            this._positionMarkersSequentially(index + 1);
+            return;
+        }
+
+        // Jump to the bookmark silently to get its position
+        var params = {
+            'Bookmark': { 'type': 'string', 'value': bookmarkName }
+        };
+
+        // Store original selection state
+        this._storeSelectionState();
+
+        console.log('[WordMeta] Jumping to bookmark:', bookmarkName, 'for marker', index);
+        this.map.sendUnoCommand('.uno:JumpToMark', params, true);
+
+        // Wait for cursor to update, then get position (increased timeout)
+        setTimeout(function () {
+            var cursorY = null;
+
+            // Debug: log what's available
+            console.log('[WordMeta] Marker', index, 'app.file:', !!app, !!app?.file,
+                'textCursor:', !!app?.file?.textCursor,
+                'rectangle:', !!app?.file?.textCursor?.rectangle);
+
+            if (app && app.file && app.file.textCursor && app.file.textCursor.rectangle) {
+                var rect = app.file.textCursor.rectangle;
+                // Convert twips to pixels - standard is 1440 twips per inch, 96 pixels per inch
+                // So 1 twip = 96/1440 = 0.0667 pixels
+                var twipsToPixels = 96 / 1440;
+                cursorY = rect.y1 * twipsToPixels;
+
+                console.log('[WordMeta] Marker', index, 'cursor rect:', rect, 'pixelY:', cursorY);
+            } else {
+                console.log('[WordMeta] Marker', index, 'NO cursor rect available');
+            }
+
+            if (cursorY !== null && cursorY >= 0) {
+                // Store the base document Y position for this marker
+                that._markerBasePositions[index] = cursorY;
+                console.log('[WordMeta] Marker', index, 'base position stored: y=' + cursorY);
+            } else {
+                // Fallback: use line-based estimate
+                that._markerBasePositions[index] = 100 + index * 80;
+                console.log('[WordMeta] Marker', index, 'using FALLBACK position:', that._markerBasePositions[index]);
+            }
+
+            // Restore selection and continue to next marker
+            that._restoreSelectionState();
+            setTimeout(function () {
+                that._positionMarkersSequentially(index + 1);
+            }, 50);
+        }, 200); // Increased timeout to allow cursor to update
+    },
+
+    /**
+     * Store current selection state before querying positions
+     */
+    _storeSelectionState: function () {
+        // For now, just clear this - we can enhance later
+        this._savedSelection = null;
+    },
+
+    /**
+     * Restore selection state after querying positions
+     */
+    _restoreSelectionState: function () {
+        // Clear selection since we don't have a saved state to restore
+        this.map.fire('clearselection');
     },
 
     /**
