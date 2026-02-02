@@ -1151,6 +1151,46 @@ window.L.Map.WOPI = window.L.Handler.extend({
 				});
 			}
 		}
+		// WordMeta: Get all paragraph first words with timestamps
+		// Format: { MessageId: 'Get_ParagraphFirstWords' }
+		else if (msg.MessageId === 'Get_ParagraphFirstWords') {
+			if (this._map.wordMeta) {
+				var stats = this._map.wordMeta.getParagraphStats();
+				var firstWords = this._map.wordMeta.getAllParagraphFirstWords();
+				this._postMessage({
+					msgId: 'Get_ParagraphFirstWords_Resp',
+					args: {
+						paragraphs: firstWords,
+						totalParagraphs: stats.totalParagraphs,
+						paragraphsWithTimestamps: stats.paragraphsWithTimestamps,
+						paragraphsSkipped: stats.paragraphsSkipped
+					}
+				});
+			} else {
+				this._postMessage({
+					msgId: 'Get_ParagraphFirstWords_Resp',
+					args: { error: 'WordMeta not available' }
+				});
+			}
+		}
+		// WordMeta: Toggle audio playback mode (controls paragraph markers)
+		// Format: { MessageId: 'Audio_Playback_Mode', Values: { enabled: true/false } }
+		else if (msg.MessageId === 'Audio_Playback_Mode') {
+			var enabled = msg.Values && msg.Values.enabled === true;
+			console.log('[Map.WOPI] Audio_Playback_Mode:', enabled);
+			if (this._map.wordMeta) {
+				this._map.wordMeta.setAudioPlaybackMode(enabled);
+				this._postMessage({
+					msgId: 'Audio_Playback_Mode_Resp',
+					args: { enabled: enabled, success: true }
+				});
+			} else {
+				this._postMessage({
+					msgId: 'Audio_Playback_Mode_Resp',
+					args: { enabled: enabled, success: false, error: 'WordMeta not available' }
+				});
+			}
+		}
 	},
 
 	_onWordMetaIndexReady: function (e) {

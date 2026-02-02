@@ -58,6 +58,16 @@ window.L.Control.WordMeta = window.L.Control.extend({
     // When false, do not create any new bookmarks during initial load.
     _autoCreateBookmarksOnLoad: false,
 
+    // Paragraph tracking: maps paragraphIndex -> first word index with valid timestamp
+    _paragraphFirstWords: {},      // { paragraphIndex: wordIndex }
+    _paragraphCount: 0,            // Total paragraphs detected
+    _paragraphsWithTimestamps: 0,  // Paragraphs that have at least one timestamped word
+    _paragraphsSkipped: 0,         // Paragraphs without any timestamped words
+
+    // Audio playback mode and paragraph markers
+    _audioPlaybackMode: false,     // Whether audio playback is active
+    _paragraphMarkers: [],         // Array of paragraph marker DOM elements
+
     // Bookmark naming prefix
     BOOKMARK_PREFIX: 'WMETA_',
 
@@ -81,6 +91,16 @@ window.L.Control.WordMeta = window.L.Control.extend({
         this._reusedBookmarkCount = 0;
         this._existingBookmarksFetched = false;
         this._existingBookmarksTimer = null;
+
+        // Paragraph tracking initialization
+        this._paragraphFirstWords = {};
+        this._paragraphCount = 0;
+        this._paragraphsWithTimestamps = 0;
+        this._paragraphsSkipped = 0;
+
+        // Audio playback mode initialization
+        this._audioPlaybackMode = false;
+        this._paragraphMarkers = [];
 
         // Register this control on the map for easy access
         map.wordMeta = this;
@@ -114,6 +134,10 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
         this._isLoaded = true;
         console.log('WordMeta: Imported ' + this._wordMetadata.length + ' words');
+
+        // Build paragraph index to identify first timestamped word in each paragraph
+        this._buildParagraphIndex();
+
         this._beginIndexing();
 
         return true;
@@ -137,6 +161,184 @@ window.L.Control.WordMeta = window.L.Control.extend({
      */
     getAllMetadata: function () {
         return this._wordMetadata;
+    },
+
+    /**
+     * Build paragraph index identifying the first word with a valid timestamp in each paragraph.
+     * Uses paragraphIndex field from backend (DOCX structure).
+     * Logs comprehensive information about each paragraph.
+     */
+    _buildParagraphIndex: function () {
+        console.log('\n========== PARAGRAPH INDEX BUILD START ==========');
+
+        this._paragraphFirstWords = {};
+        this._paragraphCount = 0;
+        this._paragraphsWithTimestamps = 0;
+        this._paragraphsSkipped = 0;
+
+        if (!this._wordMetadata || this._wordMetadata.length === 0) {
+            console.log('WordMeta: No words to index for paragraphs');
+            console.log('========== PARAGRAPH INDEX BUILD END ==========\n');
+            return;
+        }
+
+        console.log('WordMeta: Using paragraphIndex from backend (DOCX structure)');
+
+        var paragraphWords = {}; // paragraphIndex -> array of words
+
+        // Group words by paragraphIndex
+        this._wordMetadata.forEach(function (word) {
+            var paraIdx = word.paragraphIndex;
+            if (paraIdx === undefined) {
+                return; // Skip words without paragraphIndex
+            }
+            if (!paragraphWords[paraIdx]) {
+                paragraphWords[paraIdx] = [];
+            }
+            paragraphWords[paraIdx].push(word);
+        });
+
+        // Get unique paragraph indices sorted
+        var paraIndices = Object.keys(paragraphWords).map(Number).sort(function (a, b) { return a - b; });
+        this._paragraphCount = paraIndices.length;
+
+        // Find first timestamped word for each paragraph
+        for (var i = 0; i < paraIndices.length; i++) {
+            var paraIdx = paraIndices[i];
+            var words = paragraphWords[paraIdx];
+            var firstTimestamped = -1;
+            var wordsPreview = [];
+
+            for (var j = 0; j < words.length; j++) {
+                var word = words[j];
+                wordsPreview.push(word.word);
+                if (firstTimestamped === -1 && this._hasValidTimestamp(word)) {
+                    firstTimestamped = word.index;
+                }
+            }
+
+            var previewText = wordsPreview.slice(0, 8).join(' ') + (wordsPreview.length > 8 ? '...' : '');
+
+            if (firstTimestamped !== -1) {
+                this._paragraphFirstWords[paraIdx] = firstTimestamped;
+                this._paragraphsWithTimestamps++;
+                var firstWord = this._wordMetadata[firstTimestamped];
+                console.log('✅ PARA ' + paraIdx + ' [HAS TIMESTAMP] | Words: ' + words.length + ' | First TS word: "' + firstWord.word + '" at index ' + firstTimestamped + ' | Timestamp: ' + firstWord.start.toFixed(2) + 's - ' + firstWord.end.toFixed(2) + 's | Preview: "' + previewText + '"');
+            } else {
+                this._paragraphsSkipped++;
+                console.log('⏭️ PARA ' + paraIdx + ' [NO TIMESTAMP - SKIPPED] | Words: ' + words.length + ' | Preview: "' + previewText + '"');
+            }
+        }
+
+        this._logParagraphSummary();
+    },
+
+    /**
+     * Log paragraph summary
+     */
+    _logParagraphSummary: function () {
+
+        // Summary logging
+        console.log('\n---------- PARAGRAPH INDEX SUMMARY ----------');
+        console.log('Total paragraphs detected: ' + this._paragraphCount);
+        console.log('Paragraphs WITH timestamps: ' + this._paragraphsWithTimestamps);
+        console.log('Paragraphs WITHOUT timestamps (skipped): ' + this._paragraphsSkipped);
+        console.log('First timestamped words map:', this._paragraphFirstWords);
+        console.log('----------------------------------------------');
+        console.log('========== PARAGRAPH INDEX BUILD END ==========\n');
+
+        // Send paragraph index summary to parent window via postMessage
+        if (this.map && this.map.fire) {
+            var paragraphDetails = [];
+            var that = this;
+            Object.keys(this._paragraphFirstWords).forEach(function (paraIdx) {
+                var wordIdx = that._paragraphFirstWords[paraIdx];
+                var word = that._wordMetadata[wordIdx];
+                paragraphDetails.push({
+                    paragraph: parseInt(paraIdx),
+                    wordIndex: wordIdx,
+                    word: word.word,
+                    start: word.start,
+                    end: word.end,
+                    speaker: word.speaker || null
+                });
+            });
+
+            this.map.fire('postMessage', {
+                msgId: 'Paragraph_Index_Built',
+                args: {
+                    totalParagraphs: this._paragraphCount,
+                    paragraphsWithTimestamps: this._paragraphsWithTimestamps,
+                    paragraphsSkipped: this._paragraphsSkipped,
+                    paragraphs: paragraphDetails
+                }
+            });
+        }
+    },
+
+    /**
+     * Get the first timestamped word index in a specific paragraph.
+     * @param {number} paragraphIndex - Paragraph number (0-based)
+     * @returns {number} Word index or -1 if paragraph has no timestamped words
+     */
+    getFirstWordInParagraph: function (paragraphIndex) {
+        if (!this._isLoaded) {
+            console.warn('WordMeta: Not loaded yet');
+            return -1;
+        }
+        var wordIndex = this._paragraphFirstWords[paragraphIndex];
+        if (wordIndex === undefined) {
+            console.log('WordMeta: Paragraph ' + paragraphIndex + ' has no timestamped word or does not exist');
+            return -1;
+        }
+        var word = this._wordMetadata[wordIndex];
+        console.log(
+            'WordMeta: Paragraph ' + paragraphIndex + ' first TS word: "' + word.word + '" at index ' + wordIndex +
+            ' (timestamp: ' + word.start.toFixed(2) + 's - ' + word.end.toFixed(2) + 's)'
+        );
+        return wordIndex;
+    },
+
+    /**
+     * Get all paragraph first words (only paragraphs with timestamps).
+     * @returns {Object} Map of paragraphIndex -> wordIndex for paragraphs with timestamps
+     */
+    getAllParagraphFirstWords: function () {
+        console.log('\n---------- ALL PARAGRAPH FIRST WORDS ----------');
+        var result = {};
+        var that = this;
+        Object.keys(this._paragraphFirstWords).forEach(function (paraIndex) {
+            var wordIndex = that._paragraphFirstWords[paraIndex];
+            var word = that._wordMetadata[wordIndex];
+            result[paraIndex] = {
+                wordIndex: wordIndex,
+                word: word.word,
+                start: word.start,
+                end: word.end,
+                speaker: word.speaker || null
+            };
+            console.log(
+                'Para ' + paraIndex + ': "' + word.word + '" (index ' + wordIndex + ') | ' +
+                'Timestamp: ' + word.start.toFixed(2) + 's - ' + word.end.toFixed(2) + 's'
+            );
+        });
+        console.log('Total paragraphs with timestamps: ' + Object.keys(result).length);
+        console.log('Total paragraphs skipped (no timestamps): ' + this._paragraphsSkipped);
+        console.log('------------------------------------------------\n');
+        return result;
+    },
+
+    /**
+     * Get paragraph statistics.
+     * @returns {Object} Statistics about paragraph indexing
+     */
+    getParagraphStats: function () {
+        return {
+            totalParagraphs: this._paragraphCount,
+            paragraphsWithTimestamps: this._paragraphsWithTimestamps,
+            paragraphsSkipped: this._paragraphsSkipped,
+            firstWordsMap: Object.assign({}, this._paragraphFirstWords)
+        };
     },
 
     hasBookmark: function (wordIndex) {
@@ -992,6 +1194,200 @@ window.L.Control.WordMeta = window.L.Control.extend({
         } else {
             console.log(message);
         }
+    },
+
+    /**
+     * Set audio playback mode - controls visibility of paragraph markers
+     * @param {boolean} enabled - Whether audio playback is active
+     */
+    setAudioPlaybackMode: function (enabled) {
+        console.log('[WordMeta] setAudioPlaybackMode:', enabled);
+        this._audioPlaybackMode = enabled;
+
+        if (enabled) {
+            this._createParagraphMarkers();
+        } else {
+            this._destroyParagraphMarkers();
+        }
+    },
+
+    /**
+     * Check if audio playback mode is active
+     * @returns {boolean}
+     */
+    isAudioPlaybackMode: function () {
+        return this._audioPlaybackMode;
+    },
+
+    /**
+     * Create paragraph markers for all paragraphs with timestamps
+     */
+    _createParagraphMarkers: function () {
+        console.log('[WordMeta] Creating paragraph markers...');
+        this._destroyParagraphMarkers(); // Clear any existing markers
+
+        if (!this._isLoaded || Object.keys(this._paragraphFirstWords).length === 0) {
+            console.log('[WordMeta] No paragraphs to mark (not loaded or no paragraphs)');
+            return;
+        }
+
+        var that = this;
+        var markerContainer = this._getOrCreateMarkerContainer();
+        if (!markerContainer) {
+            console.warn('[WordMeta] Could not get/create marker container');
+            return;
+        }
+
+        // For each paragraph with timestamps, create a marker
+        var paragraphIndices = Object.keys(this._paragraphFirstWords).map(Number).sort(function (a, b) { return a - b; });
+        console.log('[WordMeta] Creating markers for', paragraphIndices.length, 'paragraphs');
+
+        paragraphIndices.forEach(function (paraIdx, displayIndex) {
+            var wordIndex = that._paragraphFirstWords[paraIdx];
+            var word = that._wordMetadata[wordIndex];
+            if (!word) return;
+
+            var marker = that._createMarkerElement(paraIdx, wordIndex, word, displayIndex);
+            if (marker) {
+                markerContainer.appendChild(marker);
+                that._paragraphMarkers.push(marker);
+            }
+        });
+
+        console.log('[WordMeta] Created', this._paragraphMarkers.length, 'paragraph markers');
+
+        // Position the markers after a short delay to ensure layout is ready
+        setTimeout(function () {
+            that._positionParagraphMarkers();
+        }, 100);
+    },
+
+    /**
+     * Get or create the container for paragraph markers
+     */
+    _getOrCreateMarkerContainer: function () {
+        var containerId = 'wordmeta-paragraph-markers';
+        var container = document.getElementById(containerId);
+
+        if (!container) {
+            // Try to find the document container in Collabora
+            var docContainer = document.getElementById('document-container') ||
+                document.querySelector('.leaflet-map-pane') ||
+                document.querySelector('#map');
+
+            if (!docContainer) {
+                console.warn('[WordMeta] Could not find document container for markers');
+                return null;
+            }
+
+            container = document.createElement('div');
+            container.id = containerId;
+            container.style.cssText = 'position: absolute; left: 0; top: 0; width: 40px; height: 100%; pointer-events: auto; z-index: 1000;';
+            docContainer.appendChild(container);
+            console.log('[WordMeta] Created marker container');
+        }
+
+        return container;
+    },
+
+    /**
+     * Create a single marker element for a paragraph
+     */
+    _createMarkerElement: function (paragraphIndex, wordIndex, word, displayIndex) {
+        var that = this;
+        var marker = document.createElement('div');
+        marker.className = 'wordmeta-paragraph-marker';
+        marker.setAttribute('data-paragraph-index', paragraphIndex);
+        marker.setAttribute('data-word-index', wordIndex);
+        marker.setAttribute('data-timestamp', word.start);
+
+        // Style the marker
+        marker.style.cssText = 'position: absolute; left: 5px; width: 24px; height: 24px; ' +
+            'background: rgba(124, 77, 255, 0.9); border-radius: 50%; cursor: pointer; ' +
+            'display: flex; align-items: center; justify-content: center; ' +
+            'box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.2s, background 0.2s; ' +
+            'font-size: 12px; color: white; font-weight: bold;';
+
+        // Add play icon (▶)
+        marker.innerHTML = '▶';
+        marker.title = 'Jump to ' + word.word + ' (' + word.start.toFixed(1) + 's)';
+
+        // Hover effect
+        marker.addEventListener('mouseenter', function () {
+            this.style.transform = 'scale(1.2)';
+            this.style.background = 'rgba(124, 77, 255, 1)';
+        });
+        marker.addEventListener('mouseleave', function () {
+            this.style.transform = 'scale(1)';
+            this.style.background = 'rgba(124, 77, 255, 0.9)';
+        });
+
+        // Click handler - seek to this paragraph's first word
+        marker.addEventListener('click', function (e) {
+            e.stopPropagation();
+            that._onParagraphMarkerClick(paragraphIndex, wordIndex, word);
+        });
+
+        return marker;
+    },
+
+    /**
+     * Position paragraph markers based on word positions in the document
+     */
+    _positionParagraphMarkers: function () {
+        console.log('[WordMeta] Positioning', this._paragraphMarkers.length, 'markers');
+
+        var that = this;
+        var yOffset = 0;
+
+        this._paragraphMarkers.forEach(function (marker, index) {
+            // For now, use a simple stacked layout
+            // TODO: Query actual word positions from bookmark locations
+            var topPosition = 100 + (index * 80); // 80px apart
+            marker.style.top = topPosition + 'px';
+            console.log('[WordMeta] Marker', index, 'positioned at y=' + topPosition);
+        });
+    },
+
+    /**
+     * Handle click on paragraph marker - seek audio to this paragraph
+     */
+    _onParagraphMarkerClick: function (paragraphIndex, wordIndex, word) {
+        console.log('[WordMeta] Paragraph marker clicked:', {
+            paragraphIndex: paragraphIndex,
+            wordIndex: wordIndex,
+            word: word.word,
+            timestamp: word.start
+        });
+
+        // Send postMessage to parent to seek audio
+        if (this.map && this.map.fire) {
+            this.map.fire('postMessage', {
+                msgId: 'Seek_To_Paragraph',
+                args: {
+                    paragraphIndex: paragraphIndex,
+                    wordIndex: wordIndex,
+                    word: word.word,
+                    timestamp: word.start
+                }
+            });
+        }
+
+        // Also navigate to and highlight this word in the document
+        this.navigateToWord(wordIndex);
+    },
+
+    /**
+     * Destroy all paragraph markers
+     */
+    _destroyParagraphMarkers: function () {
+        console.log('[WordMeta] Destroying paragraph markers');
+        this._paragraphMarkers.forEach(function (marker) {
+            if (marker && marker.parentNode) {
+                marker.parentNode.removeChild(marker);
+            }
+        });
+        this._paragraphMarkers = [];
     }
 });
 
