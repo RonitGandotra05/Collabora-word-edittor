@@ -192,30 +192,30 @@ window.L.Control.WordMeta = window.L.Control.extend({
      */
     _hasValidTimestamp: function (word) {
         if (!word) return false;
-        
+
         // Check for valid numeric timestamps
         var hasStart = typeof word.start === 'number' && isFinite(word.start) && word.start >= 0;
         var hasEnd = typeof word.end === 'number' && isFinite(word.end) && word.end >= 0;
-        
+
         // Word must have both start and end, and end must be > start
         if (!hasStart || !hasEnd || word.end <= word.start) {
             return false;
         }
-        
+
         // Skip known non-spoken markers (speaker labels, Q&A markers, etc.)
         var wordText = (word.word || '').trim();
         if (!wordText) return false;
-        
+
         // Skip Q&A markers like "[Q&A", "Started]", "Stopped]"
         if (wordText.match(/^\[Q&A$|^Started\]$|^Stopped\]$|^\[.*\]$/i)) {
             return false;
         }
-        
+
         // Skip speaker labels like "MR", "MR.", "MS", "MS.", or speaker names ending with ":"
         if (wordText.match(/^(MR|MS|MRS|DR)\.?$/i) || wordText.endsWith(':')) {
             return false;
         }
-        
+
         return true;
     },
 
@@ -873,7 +873,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
                 that._highlightSearchActive = false;
                 that._hasActiveHighlight = that._hasTextSelection();
                 that._resumeIndexing();
-                
+
                 if (!that._hasActiveHighlight) {
                     that._log('debug', 'WordMeta: SelectWord did not create selection for index ' + wordIndex + ', but NOT falling back to text search to avoid multi-highlight bug');
                 }
@@ -999,3 +999,23 @@ window.L.Control.WordMeta = window.L.Control.extend({
 window.L.control.wordMeta = function (options) {
     return new window.L.Control.WordMeta(options);
 };
+
+// Auto-add to existing map if present (for custom script override after bundle.js)
+(function () {
+    console.log('🟢 [CUSTOM MOUNT] Control.WordMeta.js loaded successfully!');
+
+    var existingMap = window.L && window.L.Map && window.L.Map.THIS;
+    if (existingMap) {
+        // Check if wordMeta already exists
+        if (!existingMap.wordMeta) {
+            console.log('[WordMeta] Adding control to existing map...');
+            var wordMetaControl = window.L.control.wordMeta();
+            wordMetaControl.addTo(existingMap);
+            console.log('[WordMeta] Control added successfully!');
+        } else {
+            console.log('[WordMeta] Control already exists on map');
+        }
+    } else {
+        console.log('[WordMeta] No existing map found, control will be added later');
+    }
+})();
