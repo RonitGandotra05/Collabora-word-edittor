@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   collabora:
-    image: collabora/code:25.04.8.1.1
+    image: collabora/code:latest
     container_name: collabora-code
     restart: always
     ports:
