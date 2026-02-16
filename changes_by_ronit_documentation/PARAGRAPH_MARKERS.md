@@ -64,10 +64,12 @@ The Paragraph Timestamp Markers feature adds visual markers to the left side of 
 | `setAudioPlaybackMode(enabled)` | Toggles marker visibility based on audio playback state |
 | `_createParagraphMarkers()` | Creates marker DOM elements for each paragraph |
 | `_positionParagraphMarkers()` | Initiates sequential marker positioning |
-| `_positionMarkersSequentially(index)` | Positions markers using bookmark locations |
+| `_positionMarkersSequentially(index)` | Positions markers using bookmark locations + StartOfPara |
+| `_readCursorAndPositionMarker(index, retry)` | Reads cursor position with stale detection and retries |
+| `_interpolateMissingPositions()` | Fills in missing positions using linear interpolation |
 | `_getOrCreateMarkerContainer()` | Creates the fixed-position container |
 | `_setupScrollListener()` | Sets up MutationObserver for scroll tracking |
-| `_updateMarkerPositions()` | Updates screen positions on scroll |
+| `_updateMarkerPositions()` | Updates screen positions on scroll and zoom |
 | `_createMarkerElement()` | Creates individual marker DOM element |
 | `_onParagraphMarkerClick()` | Handles click to send seek message |
 | `_destroyParagraphMarkers()` | Cleans up markers when disabled |
@@ -85,8 +87,8 @@ this._paragraphFirstWords = {
 // Array of marker DOM elements
 this._paragraphMarkers = [marker1, marker2, marker3, ...];
 
-// Base Y positions (in document coordinates, pixels)
-this._markerBasePositions = [280.13, 449.47, 652.67, 923.60, 1339.07];
+// Base Y positions (in raw Twips, e.g., 4202)
+this._markerTwipYPositions = [4202, 6520, 9230, 13390, 18500];
 ```
 
 ---
@@ -160,46 +162,50 @@ The paragraph markers use a **fixed positioning** approach with scroll tracking:
 
 ### Position Calculation Flow
 
+### Position Calculation Flow
+
 ```
 1. For each paragraph with timestamps:
    │
    ├── Find first timestamped word index
    │
-   ├── Get bookmark name (e.g., "WMETA_42")
-   │
    ├── Jump to bookmark using .uno:JumpToMark
    │
-   ├── Read cursor position from app.file.textCursor.rectangle
+   ├── Navigate to paragraph start using .uno:StartOfPara (for accuracy)
    │
-   ├── Convert twips to pixels:
-   │   cursorY = rect.y1 * (96 / 1440)  // twips to pixels
+   ├── Read cursor position (app.file.textCursor.rectangle)
+   │   └── Retry if cursor position is stale (unchanged from previous)
    │
-   └── Store in _markerBasePositions[index]
+   ├── Store raw Twip Y value in _markerTwipYPositions[index]
+   │
+   └── If bookmark missing, mark for interpolation
 
-2. After all positions collected:
+2. After all markers processed:
+   │
+   ├── Call _interpolateMissingPositions() to fill gaps
    │
    ├── Call _updateMarkerPositions()
    │
    └── Scroll back to document start
 
-3. On scroll (MutationObserver triggers):
+3. On scroll/zoom (MutationObserver triggers):
    │
-   ├── Extract translateY from map-pane transform
+   ├── Extract translateY from map-pane transform (Scroll)
    │
-   ├── Get document container bounding rect
+   ├── Convert Twips to Pixels using docLayer._twipsToPixels() (Zoom-aware)
    │
    └── For each marker:
-       screenY = baseY + translateY + containerRect.top
+       screenY = _twipsToPixels(twipY) + translateY + containerRect.top
        screenX = containerRect.left + 10
 ```
 
 ### Coordinate Spaces
 
-| Coordinate Type | Description | Example |
-|-----------------|-------------|---------|
-| Twips | LibreOffice internal units | y1: 4202 |
-| Document Pixels | Converted from twips | y: 280.13px |
-| Screen Pixels | After scroll/transform offset | top: 180.13px |
+| Coordinate Type | Description | Handling |
+|-----------------|-------------|----------|
+| **Twips** | LibreOffice internal units (1/1440 inch) | Stored raw in `_markerTwipYPositions` |
+| **CSS Pixels** | Zoom-dependent pixels | Converted via `docLayer._twipsToPixels()` |
+| **Screen Pixels** | Final absolute position | Adjusted by map pane `translate3d` (scroll) |
 
 ---
 
