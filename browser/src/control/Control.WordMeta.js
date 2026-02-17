@@ -60,6 +60,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
     // Audio playback mode
     _audioPlaybackMode: false,     // Whether audio playback is active
+    _originalContextToolbarShow: null,
     _pendingCursorBookmarkLookup: null,
     _pendingCursorBookmarkTimer: null,
     _cursorSeekTimeoutMs: 700,
@@ -90,6 +91,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
         // Audio playback mode initialization
         this._audioPlaybackMode = false;
+        this._originalContextToolbarShow = null;
         this._pendingCursorBookmarkLookup = null;
         this._pendingCursorBookmarkTimer = null;
 
@@ -1014,7 +1016,12 @@ window.L.Control.WordMeta = window.L.Control.extend({
     setAudioPlaybackMode: function (enabled) {
         console.log('[WordMeta] setAudioPlaybackMode:', enabled);
         this._audioPlaybackMode = enabled;
-        if (!enabled) this._clearPendingCursorBookmarkLookup();
+        this._toggleContextToolbarSuppression(enabled);
+        if (enabled) {
+            this._dismissSelectionUi();
+        } else {
+            this._clearPendingCursorBookmarkLookup();
+        }
     },
 
     /**
@@ -1030,6 +1037,44 @@ window.L.Control.WordMeta = window.L.Control.extend({
         if (this._pendingCursorBookmarkTimer) {
             clearTimeout(this._pendingCursorBookmarkTimer);
             this._pendingCursorBookmarkTimer = null;
+        }
+    },
+
+    _toggleContextToolbarSuppression: function (suppress) {
+        if (!this.map || !this.map.contextToolbar) {
+            return;
+        }
+
+        var contextToolbar = this.map.contextToolbar;
+        if (suppress) {
+            if (!this._originalContextToolbarShow && typeof contextToolbar.showContextToolbar === 'function') {
+                var that = this;
+                this._originalContextToolbarShow = contextToolbar.showContextToolbar;
+                contextToolbar.showContextToolbar = function () {
+                    if (that._audioPlaybackMode) {
+                        return false;
+                    }
+                    return that._originalContextToolbarShow.apply(this, arguments);
+                };
+            }
+            if (typeof contextToolbar.hideContextToolbar === 'function') {
+                contextToolbar.hideContextToolbar();
+            }
+        } else if (this._originalContextToolbarShow) {
+            contextToolbar.showContextToolbar = this._originalContextToolbarShow;
+            this._originalContextToolbarShow = null;
+        }
+    },
+
+    _dismissSelectionUi: function () {
+        if (this.map && this.map.contextToolbar && typeof this.map.contextToolbar.hideContextToolbar === 'function') {
+            this.map.contextToolbar.hideContextToolbar();
+        }
+        if (this.map && typeof this.map.fire === 'function') {
+            this.map.fire('clearselection');
+        }
+        if (app && app.socket && typeof app.socket.sendMessage === 'function') {
+            app.socket.sendMessage('resetselection');
         }
     },
 
@@ -1078,6 +1123,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
         if (!lookup) {
             return false;
         }
+        var suppressSelectionUi = this._audioPlaybackMode;
         this._clearPendingCursorBookmarkLookup();
 
         var bookmarkName = '';
@@ -1089,6 +1135,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
         if (!bookmarkName || bookmarkName.indexOf(this.BOOKMARK_PREFIX) !== 0) {
             this._log('debug', 'WordMeta: Cursor bookmark is not a WMETA bookmark');
+            if (suppressSelectionUi) this._dismissSelectionUi();
             return false;
         }
 
@@ -1096,6 +1143,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
         var match = bookmarkName.match(new RegExp('^' + escapedPrefix + '(\\d+)$'));
         if (!match) {
             this._log('warn', 'WordMeta: Invalid WMETA bookmark format: ' + bookmarkName);
+            if (suppressSelectionUi) this._dismissSelectionUi();
             return false;
         }
 
@@ -1103,6 +1151,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
         var word = this._wordMetadata[wordIndex];
         if (!word || !this._hasValidTimestamp(word)) {
             this._log('debug', 'WordMeta: Cursor bookmark word has no valid timestamp: ' + wordIndex);
+            if (suppressSelectionUi) this._dismissSelectionUi();
             return false;
         }
 
@@ -1122,7 +1171,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
             });
         }
 
-        this.navigateToWord(wordIndex);
+        if (suppressSelectionUi) this._dismissSelectionUi();
         return true;
     },
 
