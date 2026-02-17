@@ -110,6 +110,28 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		// Use capture phase to intercept before bubbling to TextInput
 		document.addEventListener('keydown', this._hotkeyInterceptor, true);
 
+		// Word-level click-to-seek: after mouseup, query WMETA bookmark under cursor.
+		this._wordSeekOnMouseUp = function (ev) {
+			var wordMeta = that._map && that._map.wordMeta;
+			if (!wordMeta || typeof wordMeta.requestSeekFromCursor !== 'function') {
+				return;
+			}
+			if (!wordMeta.isAudioPlaybackMode || !wordMeta.isAudioPlaybackMode()) {
+				return;
+			}
+			if (ev && typeof ev.button === 'number' && ev.button !== 0) {
+				return;
+			}
+			if (that._wordSeekDebounceTimer) {
+				clearTimeout(that._wordSeekDebounceTimer);
+			}
+			that._wordSeekDebounceTimer = setTimeout(function () {
+				that._wordSeekDebounceTimer = null;
+				wordMeta.requestSeekFromCursor('document-mouseup');
+			}, 80);
+		};
+		document.addEventListener('mouseup', this._wordSeekOnMouseUp, true);
+
 		if (!window.ThisIsAMobileApp) {
 			// override the window.open to issue a postMessage, so that
 			// it is possible to handle the hyperlink in the integration
@@ -157,7 +179,16 @@ window.L.Map.WOPI = window.L.Handler.extend({
 			document.removeEventListener('keydown', this._hotkeyInterceptor, true);
 			this._hotkeyInterceptor = null;
 		}
-	},
+
+		if (this._wordSeekOnMouseUp) {
+			document.removeEventListener('mouseup', this._wordSeekOnMouseUp, true);
+			this._wordSeekOnMouseUp = null;
+		}
+		if (this._wordSeekDebounceTimer) {
+			clearTimeout(this._wordSeekDebounceTimer);
+			this._wordSeekDebounceTimer = null;
+		}
+		},
 
 	// Return whether there is the capability to rename, not the permission.
 	// Since we fall back on Save As for rename isn't supported.
@@ -501,7 +532,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 						// Give UNO commands time to complete before requesting text
 						window.setTimeout(function () {
 							console.log('[SpeakerIndent] Sending gettextselection request...');
-							app.socket.sendMessage('gettextselection mimetype=text/plain;charset=utf-8');
+							app.socket.sendMessage('gettextselection mimetype=text/html,text/plain;charset=utf-8');
 
 							// Poll for the text to arrive
 							var pollCount = 0;
@@ -554,6 +585,15 @@ window.L.Map.WOPI = window.L.Handler.extend({
 					if (!lineText) return false;
 					return /^[^a-z]*[A-Z][A-Z .]*:/.test(lineText);
 				};
+				var isUsableSpeakerStyle = function (styleName) {
+					if (!styleName || typeof styleName !== 'string') return false;
+					var normalized = styleName.trim().toLowerCase();
+					if (!normalized) return false;
+					if (normalized === 'default paragraph style') return false;
+					if (normalized.indexOf('list paragraph') !== -1) return false;
+					if (normalized === 'listparagraph') return false;
+					return true;
+				};
 				var extractSpeakerName = function (lineText) {
 					if (!lineText) return null;
 					var match = lineText.match(/^[^a-z]*([A-Z][A-Z .]*?):/);
@@ -587,7 +627,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 					// If we have a non-default style and found a colon via search, accept it
 					// even if we couldn't get the text to verify (text retrieval is unreliable)
-					if (s && s !== 'Default Paragraph Style') {
+					if (isUsableSpeakerStyle(s)) {
 						// If we have text, verify it's not a timestamp
 						if (lineText && isTs) {
 							console.log('[SpeakerIndent] Skipping timestamp line, advancing search...');
@@ -605,7 +645,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 
 					// Style is default or not available - try next search result
 					if (attempts < maxAttempts && advanceSearch()) {
-						console.log('[SpeakerIndent] Style is default or unavailable, advancing search...');
+						console.log('[SpeakerIndent] Style is default/list or unavailable, advancing search...');
 						return;
 					}
 
@@ -1151,29 +1191,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 				});
 			}
 		}
-		// WordMeta: Get all paragraph first words with timestamps
-		// Format: { MessageId: 'Get_ParagraphFirstWords' }
-		else if (msg.MessageId === 'Get_ParagraphFirstWords') {
-			if (this._map.wordMeta) {
-				var stats = this._map.wordMeta.getParagraphStats();
-				var firstWords = this._map.wordMeta.getAllParagraphFirstWords();
-				this._postMessage({
-					msgId: 'Get_ParagraphFirstWords_Resp',
-					args: {
-						paragraphs: firstWords,
-						totalParagraphs: stats.totalParagraphs,
-						paragraphsWithTimestamps: stats.paragraphsWithTimestamps,
-						paragraphsSkipped: stats.paragraphsSkipped
-					}
-				});
-			} else {
-				this._postMessage({
-					msgId: 'Get_ParagraphFirstWords_Resp',
-					args: { error: 'WordMeta not available' }
-				});
-			}
-		}
-		// WordMeta: Toggle audio playback mode (controls paragraph markers)
+		// WordMeta: Toggle audio playback mode
 		// Format: { MessageId: 'Audio_Playback_Mode', Values: { enabled: true/false } }
 		else if (msg.MessageId === 'Audio_Playback_Mode') {
 			var enabled = msg.Values && msg.Values.enabled === true;

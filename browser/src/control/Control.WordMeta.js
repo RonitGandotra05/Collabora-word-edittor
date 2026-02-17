@@ -58,15 +58,11 @@ window.L.Control.WordMeta = window.L.Control.extend({
     // When false, do not create any new bookmarks during initial load.
     _autoCreateBookmarksOnLoad: false,
 
-    // Paragraph tracking: maps paragraphIndex -> first word index with valid timestamp
-    _paragraphFirstWords: {},      // { paragraphIndex: wordIndex }
-    _paragraphCount: 0,            // Total paragraphs detected
-    _paragraphsWithTimestamps: 0,  // Paragraphs that have at least one timestamped word
-    _paragraphsSkipped: 0,         // Paragraphs without any timestamped words
-
-    // Audio playback mode and paragraph markers
+    // Audio playback mode
     _audioPlaybackMode: false,     // Whether audio playback is active
-    _paragraphMarkers: [],         // Array of paragraph marker DOM elements
+    _pendingCursorBookmarkLookup: null,
+    _pendingCursorBookmarkTimer: null,
+    _cursorSeekTimeoutMs: 700,
 
     // Bookmark naming prefix
     BOOKMARK_PREFIX: 'WMETA_',
@@ -92,15 +88,10 @@ window.L.Control.WordMeta = window.L.Control.extend({
         this._existingBookmarksFetched = false;
         this._existingBookmarksTimer = null;
 
-        // Paragraph tracking initialization
-        this._paragraphFirstWords = {};
-        this._paragraphCount = 0;
-        this._paragraphsWithTimestamps = 0;
-        this._paragraphsSkipped = 0;
-
         // Audio playback mode initialization
         this._audioPlaybackMode = false;
-        this._paragraphMarkers = [];
+        this._pendingCursorBookmarkLookup = null;
+        this._pendingCursorBookmarkTimer = null;
 
         // Register this control on the map for easy access
         map.wordMeta = this;
@@ -135,9 +126,6 @@ window.L.Control.WordMeta = window.L.Control.extend({
         this._isLoaded = true;
         console.log('WordMeta: Imported ' + this._wordMetadata.length + ' words');
 
-        // Build paragraph index to identify first timestamped word in each paragraph
-        this._buildParagraphIndex();
-
         this._beginIndexing();
 
         return true;
@@ -161,184 +149,6 @@ window.L.Control.WordMeta = window.L.Control.extend({
      */
     getAllMetadata: function () {
         return this._wordMetadata;
-    },
-
-    /**
-     * Build paragraph index identifying the first word with a valid timestamp in each paragraph.
-     * Uses paragraphIndex field from backend (DOCX structure).
-     * Logs comprehensive information about each paragraph.
-     */
-    _buildParagraphIndex: function () {
-        console.log('\n========== PARAGRAPH INDEX BUILD START ==========');
-
-        this._paragraphFirstWords = {};
-        this._paragraphCount = 0;
-        this._paragraphsWithTimestamps = 0;
-        this._paragraphsSkipped = 0;
-
-        if (!this._wordMetadata || this._wordMetadata.length === 0) {
-            console.log('WordMeta: No words to index for paragraphs');
-            console.log('========== PARAGRAPH INDEX BUILD END ==========\n');
-            return;
-        }
-
-        console.log('WordMeta: Using paragraphIndex from backend (DOCX structure)');
-
-        var paragraphWords = {}; // paragraphIndex -> array of words
-
-        // Group words by paragraphIndex
-        this._wordMetadata.forEach(function (word) {
-            var paraIdx = word.paragraphIndex;
-            if (paraIdx === undefined) {
-                return; // Skip words without paragraphIndex
-            }
-            if (!paragraphWords[paraIdx]) {
-                paragraphWords[paraIdx] = [];
-            }
-            paragraphWords[paraIdx].push(word);
-        });
-
-        // Get unique paragraph indices sorted
-        var paraIndices = Object.keys(paragraphWords).map(Number).sort(function (a, b) { return a - b; });
-        this._paragraphCount = paraIndices.length;
-
-        // Find first timestamped word for each paragraph
-        for (var i = 0; i < paraIndices.length; i++) {
-            var paraIdx = paraIndices[i];
-            var words = paragraphWords[paraIdx];
-            var firstTimestamped = -1;
-            var wordsPreview = [];
-
-            for (var j = 0; j < words.length; j++) {
-                var word = words[j];
-                wordsPreview.push(word.word);
-                if (firstTimestamped === -1 && this._hasValidTimestamp(word)) {
-                    firstTimestamped = word.index;
-                }
-            }
-
-            var previewText = wordsPreview.slice(0, 8).join(' ') + (wordsPreview.length > 8 ? '...' : '');
-
-            if (firstTimestamped !== -1) {
-                this._paragraphFirstWords[paraIdx] = firstTimestamped;
-                this._paragraphsWithTimestamps++;
-                var firstWord = this._wordMetadata[firstTimestamped];
-                console.log('✅ PARA ' + paraIdx + ' [HAS TIMESTAMP] | Words: ' + words.length + ' | First TS word: "' + firstWord.word + '" at index ' + firstTimestamped + ' | Timestamp: ' + firstWord.start.toFixed(2) + 's - ' + firstWord.end.toFixed(2) + 's | Preview: "' + previewText + '"');
-            } else {
-                this._paragraphsSkipped++;
-                console.log('⏭️ PARA ' + paraIdx + ' [NO TIMESTAMP - SKIPPED] | Words: ' + words.length + ' | Preview: "' + previewText + '"');
-            }
-        }
-
-        this._logParagraphSummary();
-    },
-
-    /**
-     * Log paragraph summary
-     */
-    _logParagraphSummary: function () {
-
-        // Summary logging
-        console.log('\n---------- PARAGRAPH INDEX SUMMARY ----------');
-        console.log('Total paragraphs detected: ' + this._paragraphCount);
-        console.log('Paragraphs WITH timestamps: ' + this._paragraphsWithTimestamps);
-        console.log('Paragraphs WITHOUT timestamps (skipped): ' + this._paragraphsSkipped);
-        console.log('First timestamped words map:', this._paragraphFirstWords);
-        console.log('----------------------------------------------');
-        console.log('========== PARAGRAPH INDEX BUILD END ==========\n');
-
-        // Send paragraph index summary to parent window via postMessage
-        if (this.map && this.map.fire) {
-            var paragraphDetails = [];
-            var that = this;
-            Object.keys(this._paragraphFirstWords).forEach(function (paraIdx) {
-                var wordIdx = that._paragraphFirstWords[paraIdx];
-                var word = that._wordMetadata[wordIdx];
-                paragraphDetails.push({
-                    paragraph: parseInt(paraIdx),
-                    wordIndex: wordIdx,
-                    word: word.word,
-                    start: word.start,
-                    end: word.end,
-                    speaker: word.speaker || null
-                });
-            });
-
-            this.map.fire('postMessage', {
-                msgId: 'Paragraph_Index_Built',
-                args: {
-                    totalParagraphs: this._paragraphCount,
-                    paragraphsWithTimestamps: this._paragraphsWithTimestamps,
-                    paragraphsSkipped: this._paragraphsSkipped,
-                    paragraphs: paragraphDetails
-                }
-            });
-        }
-    },
-
-    /**
-     * Get the first timestamped word index in a specific paragraph.
-     * @param {number} paragraphIndex - Paragraph number (0-based)
-     * @returns {number} Word index or -1 if paragraph has no timestamped words
-     */
-    getFirstWordInParagraph: function (paragraphIndex) {
-        if (!this._isLoaded) {
-            console.warn('WordMeta: Not loaded yet');
-            return -1;
-        }
-        var wordIndex = this._paragraphFirstWords[paragraphIndex];
-        if (wordIndex === undefined) {
-            console.log('WordMeta: Paragraph ' + paragraphIndex + ' has no timestamped word or does not exist');
-            return -1;
-        }
-        var word = this._wordMetadata[wordIndex];
-        console.log(
-            'WordMeta: Paragraph ' + paragraphIndex + ' first TS word: "' + word.word + '" at index ' + wordIndex +
-            ' (timestamp: ' + word.start.toFixed(2) + 's - ' + word.end.toFixed(2) + 's)'
-        );
-        return wordIndex;
-    },
-
-    /**
-     * Get all paragraph first words (only paragraphs with timestamps).
-     * @returns {Object} Map of paragraphIndex -> wordIndex for paragraphs with timestamps
-     */
-    getAllParagraphFirstWords: function () {
-        console.log('\n---------- ALL PARAGRAPH FIRST WORDS ----------');
-        var result = {};
-        var that = this;
-        Object.keys(this._paragraphFirstWords).forEach(function (paraIndex) {
-            var wordIndex = that._paragraphFirstWords[paraIndex];
-            var word = that._wordMetadata[wordIndex];
-            result[paraIndex] = {
-                wordIndex: wordIndex,
-                word: word.word,
-                start: word.start,
-                end: word.end,
-                speaker: word.speaker || null
-            };
-            console.log(
-                'Para ' + paraIndex + ': "' + word.word + '" (index ' + wordIndex + ') | ' +
-                'Timestamp: ' + word.start.toFixed(2) + 's - ' + word.end.toFixed(2) + 's'
-            );
-        });
-        console.log('Total paragraphs with timestamps: ' + Object.keys(result).length);
-        console.log('Total paragraphs skipped (no timestamps): ' + this._paragraphsSkipped);
-        console.log('------------------------------------------------\n');
-        return result;
-    },
-
-    /**
-     * Get paragraph statistics.
-     * @returns {Object} Statistics about paragraph indexing
-     */
-    getParagraphStats: function () {
-        return {
-            totalParagraphs: this._paragraphCount,
-            paragraphsWithTimestamps: this._paragraphsWithTimestamps,
-            paragraphsSkipped: this._paragraphsSkipped,
-            firstWordsMap: Object.assign({}, this._paragraphFirstWords)
-        };
     },
 
     hasBookmark: function (wordIndex) {
@@ -588,6 +398,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
      */
     clear: function () {
         this._cancelIndexing();
+        this._clearPendingCursorBookmarkLookup();
         this._wordMetadata = [];
         this._bookmarksCreated = {};
         this._isLoaded = false;
@@ -1197,18 +1008,13 @@ window.L.Control.WordMeta = window.L.Control.extend({
     },
 
     /**
-     * Set audio playback mode - controls visibility of paragraph markers
+     * Set audio playback mode.
      * @param {boolean} enabled - Whether audio playback is active
      */
     setAudioPlaybackMode: function (enabled) {
         console.log('[WordMeta] setAudioPlaybackMode:', enabled);
         this._audioPlaybackMode = enabled;
-
-        if (enabled) {
-            this._createParagraphMarkers();
-        } else {
-            this._destroyParagraphMarkers();
-        }
+        if (!enabled) this._clearPendingCursorBookmarkLookup();
     },
 
     /**
@@ -1219,458 +1025,108 @@ window.L.Control.WordMeta = window.L.Control.extend({
         return this._audioPlaybackMode;
     },
 
-    /**
-     * Create paragraph markers for all paragraphs with timestamps
-     */
-    _createParagraphMarkers: function () {
-        console.log('[WordMeta] Creating paragraph markers...');
-        this._destroyParagraphMarkers(); // Clear any existing markers
-
-        if (!this._isLoaded || Object.keys(this._paragraphFirstWords).length === 0) {
-            console.log('[WordMeta] No paragraphs to mark (not loaded or no paragraphs)');
-            return;
-        }
-
-        var that = this;
-        var markerContainer = this._getOrCreateMarkerContainer();
-        if (!markerContainer) {
-            console.warn('[WordMeta] Could not get/create marker container');
-            return;
-        }
-
-        // For each paragraph with timestamps, create a marker
-        var paragraphIndices = Object.keys(this._paragraphFirstWords).map(Number).sort(function (a, b) { return a - b; });
-        console.log('[WordMeta] Creating markers for', paragraphIndices.length, 'paragraphs');
-
-        paragraphIndices.forEach(function (paraIdx, displayIndex) {
-            var wordIndex = that._paragraphFirstWords[paraIdx];
-            var word = that._wordMetadata[wordIndex];
-            if (!word) return;
-
-            var marker = that._createMarkerElement(paraIdx, wordIndex, word, displayIndex);
-            if (marker) {
-                markerContainer.appendChild(marker);
-                that._paragraphMarkers.push(marker);
-            }
-        });
-
-        console.log('[WordMeta] Created', this._paragraphMarkers.length, 'paragraph markers');
-
-        // Position the markers after a short delay to ensure layout is ready
-        setTimeout(function () {
-            that._positionParagraphMarkers();
-        }, 100);
-    },
-
-    /**
-     * Get or create the container for paragraph markers
-     * Container uses fixed positioning and tracks scroll to update marker positions
-     */
-    _getOrCreateMarkerContainer: function () {
-        var containerId = 'wordmeta-paragraph-markers';
-        var container = document.getElementById(containerId);
-
-        if (!container) {
-            // Find the document container to position markers relative to
-            var docContainer = document.getElementById('document-container');
-            if (!docContainer) {
-                console.warn('[WordMeta] Could not find document-container');
-                return null;
-            }
-
-            container = document.createElement('div');
-            container.id = containerId;
-            // Fixed position, will be updated relative to document container
-            container.style.cssText = 'position: fixed; left: 0; top: 0; width: 50px; height: 100vh; pointer-events: none; z-index: 99999; overflow: visible;';
-            document.body.appendChild(container);
-            console.log('[WordMeta] Created marker container at body level');
-
-            // Store initial position for reference
-            var rect = docContainer.getBoundingClientRect();
-            this._docContainerLeft = rect.left;
-            this._docContainerTop = rect.top;
-
-            // Set up scroll listener
-            this._setupScrollListener();
-        }
-
-        return container;
-    },
-
-    /**
-     * Set up scroll listener to update marker positions
-     */
-    _setupScrollListener: function () {
-        var that = this;
-        var mapPane = document.querySelector('.leaflet-map-pane');
-        if (!mapPane) return;
-
-        // Use MutationObserver to track transform changes
-        var observer = new MutationObserver(function () {
-            that._updateMarkerPositions();
-        });
-        observer.observe(mapPane, { attributes: true, attributeFilter: ['style'] });
-        this._scrollObserver = observer;
-        console.log('[WordMeta] Scroll listener set up');
-    },
-
-    /**
-     * Update all marker positions based on current scroll state
-     */
-    _updateMarkerPositions: function () {
-        if (!this._paragraphMarkers || !this._markerTwipYPositions) return;
-
-        var docLayer = this.map._docLayer;
-
-        // Parse the scroll offset from the leaflet map pane's translate3d transform
-        // Collabora handles scrolling via this transform, NOT by changing the map center
-        var mapPane = document.querySelector('.leaflet-map-pane');
-        if (!mapPane) return;
-        var transform = mapPane.style.transform || '';
-        var translateY = 0;
-        var translateX = 0;
-        var match = transform.match(/translate3d\(([^,]+)px,\s*([^,]+)px/);
-        if (match) {
-            translateX = parseFloat(match[1]) || 0;
-            translateY = parseFloat(match[2]) || 0;
-        }
-
-        // Get document container position for viewport offset
-        var docContainer = document.getElementById('document-container');
-        var containerRect = docContainer ? docContainer.getBoundingClientRect() : { left: 0, top: 0 };
-
-        // Check if zoom-aware conversion is available
-        var useTwipsPx = docLayer && (typeof docLayer._twipsToPixels === 'function');
-
-        // Update each marker position
-        for (var i = 0; i < this._paragraphMarkers.length; i++) {
-            var marker = this._paragraphMarkers[i];
-            var twipY = this._markerTwipYPositions[i];
-            if (twipY === null || twipY === undefined) continue;
-
-            var pixelY;
-            if (useTwipsPx) {
-                // Zoom-aware conversion using Collabora's internal API
-                try {
-                    var pixelPoint = docLayer._twipsToPixels(new cool.Point(0, twipY));
-                    pixelY = pixelPoint.y;
-                } catch (e) {
-                    // Fallback to hardcoded conversion
-                    pixelY = twipY * (96 / 1440);
-                }
-            } else {
-                // Fallback: hardcoded conversion (only correct at default zoom)
-                pixelY = twipY * (96 / 1440);
-            }
-
-            // Combine: zoom-aware pixel position + scroll offset + container offset
-            var screenY = pixelY + translateY + containerRect.top;
-            marker.style.top = screenY + 'px';
-            marker.style.left = (containerRect.left + 10) + 'px';
+    _clearPendingCursorBookmarkLookup: function () {
+        this._pendingCursorBookmarkLookup = null;
+        if (this._pendingCursorBookmarkTimer) {
+            clearTimeout(this._pendingCursorBookmarkTimer);
+            this._pendingCursorBookmarkTimer = null;
         }
     },
 
     /**
-     * Create a single marker element for a paragraph
+     * Request bookmark under current cursor/selection position and emit seek event if it matches WMETA.
+     * Intended for click-to-seek while audio playback mode is active.
+     * @param {string} source - Event source label for debug/telemetry
+     * @returns {boolean} True when request was queued
      */
-    _createMarkerElement: function (paragraphIndex, wordIndex, word, displayIndex) {
-        var that = this;
-        var marker = document.createElement('div');
-        marker.className = 'wordmeta-paragraph-marker';
-        marker.setAttribute('data-paragraph-index', paragraphIndex);
-        marker.setAttribute('data-word-index', wordIndex);
-        marker.setAttribute('data-timestamp', word.start);
-
-        // Style the marker - using fixed positioning, position will be set dynamically
-        marker.style.cssText = 'position: fixed; left: 10px; top: 0; width: 28px; height: 28px; ' +
-            'background: rgba(124, 77, 255, 0.9); border-radius: 50%; cursor: pointer; ' +
-            'display: flex; align-items: center; justify-content: center; ' +
-            'box-shadow: 0 2px 4px rgba(0,0,0,0.3); transition: top 0.1s ease-out, background 0.2s; ' +
-            'font-size: 14px; color: white; font-weight: bold; pointer-events: auto;';
-
-        // Add play icon (▶)
-        marker.innerHTML = '▶';
-        marker.title = 'Jump to ' + word.word + ' (' + word.start.toFixed(1) + 's)';
-
-        // Hover effect
-        marker.addEventListener('mouseenter', function () {
-            this.style.transform = 'scale(1.2)';
-            this.style.background = 'rgba(124, 77, 255, 1)';
-        });
-        marker.addEventListener('mouseleave', function () {
-            this.style.transform = 'scale(1)';
-            this.style.background = 'rgba(124, 77, 255, 0.9)';
-        });
-
-        // Click handler - seek to this paragraph's first word
-        marker.addEventListener('click', function (e) {
-            e.stopPropagation();
-            that._onParagraphMarkerClick(paragraphIndex, wordIndex, word);
-        });
-
-        return marker;
-    },
-
-    /**
-     * Position paragraph markers based on word positions in the document
-     * Uses bookmark positions to align markers with actual paragraph starts
-     */
-    _positionParagraphMarkers: function () {
-        console.log('[WordMeta] Positioning', this._paragraphMarkers.length, 'markers');
-
-        var that = this;
-
-        // Get the document container to get its bounds
-        var docContainer = document.getElementById('document-container') ||
-            document.querySelector('.leaflet-tile-pane') ||
-            document.querySelector('#map');
-
-        if (!docContainer) {
-            console.warn('[WordMeta] Could not find document container for marker positioning');
-            return;
+    requestSeekFromCursor: function (source) {
+        if (!this._audioPlaybackMode || !this._isLoaded || !this._wordMetadata.length) {
+            return false;
         }
 
-        // Get the canvas tiles container for more accurate positioning
-        var tilesPane = document.querySelector('.leaflet-tile-pane');
-        var canvasFrame = document.querySelector('#canvas-container') ||
-            document.querySelector('.leaflet-map-pane');
-
-        // Position markers by querying bookmark positions sequentially
-        this._positionMarkersSequentially(0);
-    },
-
-    /**
-     * Position markers one by one by jumping to each bookmark,
-     * then navigating to the paragraph start for accurate positioning.
-     * Includes stale cursor detection with retry logic.
-     */
-    _positionMarkersSequentially: function (index) {
-        // Initialize tracking on first call
-        if (index === 0) {
-            this._markerTwipYPositions = [];
-            this._lastReadCursorY = -1; // Track for stale cursor detection
-        }
-
-        if (index >= this._paragraphMarkers.length) {
-            console.log('[WordMeta] All', this._paragraphMarkers.length, 'markers positioned');
-            // Fill in any fallback positions using interpolation from neighbors
-            this._interpolateMissingPositions();
-            // After all markers positioned, update their screen positions and scroll back to top
-            this._updateMarkerPositions();
-            this.map.sendUnoCommand('.uno:GoToStartOfDoc');
-            return;
-        }
-
-        var that = this;
-        var marker = this._paragraphMarkers[index];
-        var wordIndex = parseInt(marker.getAttribute('data-word-index'), 10);
-        var bookmarkName = this._bookmarksCreated[wordIndex];
-
-        if (!bookmarkName) {
-            console.warn('[WordMeta] No bookmark for marker', index, 'wordIndex:', wordIndex);
-            // Mark as needing interpolation (will be filled in at the end)
-            this._markerTwipYPositions[index] = null;
-            this._positionMarkersSequentially(index + 1);
-            return;
-        }
-
-        // Jump to the bookmark silently to get its position
-        var params = {
-            'Bookmark': { 'type': 'string', 'value': bookmarkName }
+        var lookup = {
+            source: source || 'cursor-click',
+            startedAt: Date.now()
         };
+        this._pendingCursorBookmarkLookup = lookup;
 
-        // Store original selection state
-        this._storeSelectionState();
+        if (this._pendingCursorBookmarkTimer) {
+            clearTimeout(this._pendingCursorBookmarkTimer);
+        }
 
-        console.log('[WordMeta] Jumping to bookmark:', bookmarkName, 'for marker', index);
-        this.map.sendUnoCommand('.uno:JumpToMark', params, true);
-
-        // After jumping to bookmark, navigate to start of paragraph for accurate positioning
-        setTimeout(function () {
-            that.map.sendUnoCommand('.uno:StartOfPara');
-        }, 200);
-
-        // Read cursor position after both commands have executed
-        setTimeout(function () {
-            that._readCursorAndPositionMarker(index, 0);
-        }, 500);
-    },
-
-    /**
-     * Read cursor position for a marker, with retry on stale reads.
-     * @param {number} index - Marker index
-     * @param {number} retryCount - Current retry attempt (max 1)
-     */
-    _readCursorAndPositionMarker: function (index, retryCount) {
         var that = this;
-        var twipY = null;
-
-        if (app && app.file && app.file.textCursor && app.file.textCursor.rectangle) {
-            var rect = app.file.textCursor.rectangle;
-            // Store raw twip Y value - will be converted to pixels using
-            // Collabora's zoom-aware _twipsToPixels in _updateMarkerPositions
-            twipY = rect.y1;
-
-            console.log('[WordMeta] Marker', index, 'cursor rect:', rect, 'twipY:', twipY);
-
-            // Stale cursor detection: if Y is identical to previous read and this isn't
-            // the first marker, the cursor may not have updated yet
-            if (retryCount === 0 && index > 0 && twipY === this._lastReadCursorY) {
-                console.warn('[WordMeta] Marker', index, 'stale cursor detected (same twipY as previous:', twipY, '), retrying...');
-                setTimeout(function () {
-                    that._readCursorAndPositionMarker(index, retryCount + 1);
-                }, 300);
-                return;
+        this._pendingCursorBookmarkTimer = setTimeout(function () {
+            if (that._pendingCursorBookmarkLookup === lookup) {
+                that._pendingCursorBookmarkLookup = null;
+                that._pendingCursorBookmarkTimer = null;
+                that._log('debug', 'WordMeta: Cursor bookmark lookup timed out');
             }
-        } else {
-            console.log('[WordMeta] Marker', index, 'NO cursor rect available');
-        }
+        }, this._cursorSeekTimeoutMs);
 
-        if (twipY !== null && twipY >= 0) {
-            this._markerTwipYPositions[index] = twipY;
-            this._lastReadCursorY = twipY;
-            console.log('[WordMeta] Marker', index, 'twip position stored: y=' + twipY);
-        } else {
-            // Mark as needing interpolation
-            this._markerTwipYPositions[index] = null;
-            console.log('[WordMeta] Marker', index, 'position deferred for interpolation');
-        }
-
-        // Restore selection and continue to next marker
-        this._restoreSelectionState();
-        setTimeout(function () {
-            that._positionMarkersSequentially(index + 1);
-        }, 80);
+        app.socket.sendMessage('commandvalues command=.uno:Bookmark?namePrefix=' + this.BOOKMARK_PREFIX);
+        return true;
     },
 
     /**
-     * Fill in positions for markers that couldn't be positioned via bookmarks.
-     * Uses linear interpolation from successfully positioned neighbors.
+     * Handle `.uno:Bookmark` response for cursor lookup and emit `Seek_To_Word`.
+     * Returns true only when this response corresponds to a pending WordMeta cursor seek.
+     * @param {Object|string} bookmark - Bookmark payload from commandvalues response
+     * @returns {boolean}
      */
-    _interpolateMissingPositions: function () {
-        var positions = this._markerTwipYPositions;
-        if (!positions || positions.length === 0) return;
+    handleBookmarkUnderCursor: function (bookmark) {
+        var lookup = this._pendingCursorBookmarkLookup;
+        if (!lookup) {
+            return false;
+        }
+        this._clearPendingCursorBookmarkLookup();
 
-        // Find first and last valid positions for boundary defaults
-        var firstValid = null;
-        var lastValid = null;
-        for (var i = 0; i < positions.length; i++) {
-            if (positions[i] !== null) {
-                if (firstValid === null) firstValid = i;
-                lastValid = i;
-            }
+        var bookmarkName = '';
+        if (bookmark && typeof bookmark.name === 'string') {
+            bookmarkName = bookmark.name.trim();
+        } else if (typeof bookmark === 'string') {
+            bookmarkName = bookmark.trim();
         }
 
-        // If no valid positions at all, use uniform spacing
-        if (firstValid === null) {
-            for (var j = 0; j < positions.length; j++) {
-                positions[j] = 100 + j * 80;
-            }
-            console.warn('[WordMeta] No valid positions found, using uniform fallback spacing');
-            return;
+        if (!bookmarkName || bookmarkName.indexOf(this.BOOKMARK_PREFIX) !== 0) {
+            this._log('debug', 'WordMeta: Cursor bookmark is not a WMETA bookmark');
+            return false;
         }
 
-        // Fill in nulls by interpolating between nearest valid neighbors
-        for (var k = 0; k < positions.length; k++) {
-            if (positions[k] !== null) continue;
-
-            // Find previous valid position
-            var prevIdx = -1;
-            var prevY = positions[firstValid]; // default to first valid
-            for (var p = k - 1; p >= 0; p--) {
-                if (positions[p] !== null) {
-                    prevIdx = p;
-                    prevY = positions[p];
-                    break;
-                }
-            }
-
-            // Find next valid position
-            var nextIdx = -1;
-            var nextY = positions[lastValid]; // default to last valid
-            for (var n = k + 1; n < positions.length; n++) {
-                if (positions[n] !== null) {
-                    nextIdx = n;
-                    nextY = positions[n];
-                    break;
-                }
-            }
-
-            // Interpolate
-            if (prevIdx >= 0 && nextIdx >= 0) {
-                // Between two valid positions - linear interpolation
-                var fraction = (k - prevIdx) / (nextIdx - prevIdx);
-                positions[k] = prevY + fraction * (nextY - prevY);
-            } else if (prevIdx >= 0) {
-                // After last valid - extrapolate with average spacing
-                var avgSpacing = (positions[lastValid] - positions[firstValid]) / (lastValid - firstValid) || 80;
-                positions[k] = prevY + (k - prevIdx) * avgSpacing;
-            } else {
-                // Before first valid - extrapolate backwards
-                var avgSpacingBefore = (positions[lastValid] - positions[firstValid]) / (lastValid - firstValid) || 80;
-                positions[k] = nextY - (nextIdx - k) * avgSpacingBefore;
-            }
-
-            console.log('[WordMeta] Marker', k, 'interpolated position:', positions[k]);
+        var escapedPrefix = this.BOOKMARK_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        var match = bookmarkName.match(new RegExp('^' + escapedPrefix + '(\\d+)$'));
+        if (!match) {
+            this._log('warn', 'WordMeta: Invalid WMETA bookmark format: ' + bookmarkName);
+            return false;
         }
-    },
 
-    /**
-     * Store current selection state before querying positions
-     */
-    _storeSelectionState: function () {
-        // For now, just clear this - we can enhance later
-        this._savedSelection = null;
-    },
+        var wordIndex = parseInt(match[1], 10);
+        var word = this._wordMetadata[wordIndex];
+        if (!word || !this._hasValidTimestamp(word)) {
+            this._log('debug', 'WordMeta: Cursor bookmark word has no valid timestamp: ' + wordIndex);
+            return false;
+        }
 
-    /**
-     * Restore selection state after querying positions
-     */
-    _restoreSelectionState: function () {
-        // Clear selection since we don't have a saved state to restore
-        this.map.fire('clearselection');
-    },
-
-    /**
-     * Handle click on paragraph marker - seek audio to this paragraph
-     */
-    _onParagraphMarkerClick: function (paragraphIndex, wordIndex, word) {
-        console.log('[WordMeta] Paragraph marker clicked:', {
-            paragraphIndex: paragraphIndex,
-            wordIndex: wordIndex,
-            word: word.word,
-            timestamp: word.start
-        });
-
-        // Send postMessage to parent to seek audio
+        this._log('debug', 'WordMeta: Cursor seek -> word #' + wordIndex + ' "' + word.word + '" @ ' + word.start);
         if (this.map && this.map.fire) {
             this.map.fire('postMessage', {
-                msgId: 'Seek_To_Paragraph',
+                msgId: 'Seek_To_Word',
                 args: {
-                    paragraphIndex: paragraphIndex,
                     wordIndex: wordIndex,
                     word: word.word,
-                    timestamp: word.start
+                    timestamp: word.start,
+                    start: word.start,
+                    end: word.end,
+                    bookmark: bookmarkName,
+                    source: lookup.source
                 }
             });
         }
 
-        // Also navigate to and highlight this word in the document
         this.navigateToWord(wordIndex);
+        return true;
     },
 
-    /**
-     * Destroy all paragraph markers
-     */
-    _destroyParagraphMarkers: function () {
-        console.log('[WordMeta] Destroying paragraph markers');
-        this._paragraphMarkers.forEach(function (marker) {
-            if (marker && marker.parentNode) {
-                marker.parentNode.removeChild(marker);
-            }
-        });
-        this._paragraphMarkers = [];
-    }
+    // Paragraph marker functionality has been removed intentionally.
 });
 
 // Register the control
