@@ -326,16 +326,28 @@ Refused to frame '...' because an ancestor violates the Content Security Policy 
 "frame-ancestors collabora-ronit-version-...run.app:* api.tisaproductions.com:*"
 ```
 
-**Fix:** Add `--o:net.frame_ancestors=http://localhost:3000` to `extra_params`:
+**Root cause:** `--o:net.frame_ancestors` in `extra_params` only accepts a **single value** via command-line (spaces split loolwsd arguments). The workaround is to use `*` which allows any domain to embed Collabora.
+
+> [!IMPORTANT]
+> Use `^|^` as the env-var separator (instead of the default `,`) because `extra_params` and `aliasgroup1` need to be set together.
 
 ```bash
 gcloud run services update collabora-ronit-version \
   --region us-central1 \
-  --update-env-vars "extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000,aliasgroup1=https://api.tisaproductions.com"
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=*|aliasgroup1=https://api.tisaproductions.com"
+```
+
+Verify the CSP:
+```bash
+curl -s -I "https://collabora-ronit-version-140170437531.us-central1.run.app/browser/dist/cool.html?WOPISrc=test" | grep -i frame-ancestors
+# Expected: frame-ancestors  * collabora-ronit-version-...run.app:* :*
 ```
 
 > [!NOTE]
-> **You do NOT need to stop the previous running instance.** Cloud Run automatically creates a new revision and routes 100% of traffic to it. The old instance shuts down on its own. Every `gcloud run services update` is a zero-downtime rolling update.
+> Using `*` is safe because opening a document still requires a valid WOPI access token validated by the Flask backend. The CSP restriction only controls who can embed the iframe, not who can access documents.
+>
+> **You do NOT need to stop the previous running instance.** Cloud Run automatically creates a new revision and routes 100% of traffic to it.
+
 
 For production (packaged Electron app), update the frame_ancestors to match the app's actual origin (e.g., `app://` or `file://`).
 
@@ -423,7 +435,7 @@ Collabora reads/writes files here via WOPI. Electron downloads a local copy on e
 # Set project
 gcloud config set project vivid-env-425623-i6
 
-# Deploy/update Collabora
+# Deploy/update Collabora (with frame_ancestors for all allowed origins)
 gcloud run services update collabora-ronit-version \
   --region us-central1 \
   --port 9980 \
@@ -432,7 +444,7 @@ gcloud run services update collabora-ronit-version \
   --timeout 300 \
   --min-instances 1 \
   --max-instances 3 \
-  --update-env-vars "extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false,aliasgroup1=https://api.tisaproductions.com"
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
 
 # Make public
 gcloud run services add-iam-policy-binding collabora-ronit-version \
