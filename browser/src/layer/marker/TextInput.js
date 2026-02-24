@@ -661,6 +661,11 @@ window.L.TextInput = window.L.Layer.extend({
 	_onBeforeInput: function (ev) {
 		if (this._map.uiManager.isUIBlocked())
 			return;
+		// Block all text mutation during audio playback mode
+		if (this._map && this._map._audioPlaybackMode) {
+			ev.preventDefault();
+			return;
+		}
 		this._statusLog('_onBeforeInput [');
 		this._ignoreNextBackspace = false;
 		if (!this._isSelectionValid()) {
@@ -693,6 +698,10 @@ window.L.TextInput = window.L.Layer.extend({
 	_onInput: function (ev) {
 		if (this._map.uiManager.isUIBlocked())
 			return;
+		// Block all text input during audio playback mode
+		if (this._map && this._map._audioPlaybackMode) {
+			return;
+		}
 		this._statusLog('_onInput [');
 		app.idleHandler.notifyActive();
 
@@ -983,6 +992,12 @@ window.L.TextInput = window.L.Layer.extend({
 	_onKeyDown: function (ev) {
 		if (this._map.uiManager.isUIBlocked())
 			return;
+		// During audio playback, the document-level interceptor in Map.WOPI
+		// handles everything. If an event leaks through, block it here too.
+		if (this._map && this._map._audioPlaybackMode) {
+			ev.preventDefault();
+			return;
+		}
 		var hotkeyMode = this._map && this._map._hotkeyMode;
 		// Debug logging for hotkey mode
 		if (ev.key && ev.key.length === 1) {

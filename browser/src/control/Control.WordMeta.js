@@ -183,13 +183,16 @@ window.L.Control.WordMeta = window.L.Control.extend({
                 continue;
             }
 
-            if (timeSeconds >= word.start && timeSeconds <= word.end) {
+            // Use half-open interval [start, end) so that when adjacent words
+            // share a boundary (word N end == word N+1 start), the time maps
+            // to word N+1. Last word uses <= to include its endpoint.
+            var isLast = (mid === this._wordMetadata.length - 1);
+            if (timeSeconds >= word.start && (isLast ? timeSeconds <= word.end : timeSeconds < word.end)) {
                 return mid;
             } else if (timeSeconds < word.start) {
                 right = mid - 1;
             } else {
-                // Time is after this word's end
-                // DON'T return this word - only return if time is WITHIN a word's range
+                // Time is at or after this word's end — move right
                 left = mid + 1;
             }
         }

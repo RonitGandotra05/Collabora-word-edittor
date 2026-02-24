@@ -401,3 +401,109 @@ Notes:
 
 - `docker/from-packages`: faster, package-based image; does not fully rebuild bundled frontend internals from your source tree.
 - `docker/from-source`: full compile from source; required for bundled browser changes.
+
+## 15. Branding Customization (Stenope Editor)
+
+The Collabora branding is controlled by `browser/dist/cool.html`. This file is gitignored by default, so force-add it:
+
+```bash
+git add -f browser/dist/cool.html
+```
+
+### What was changed
+
+| Location | Before | After |
+|---|---|---|
+| `<title>` (line 3) | `Online Editor` | `Stenope Editor` |
+| About dialog `<h1>` (line 165) | `Collabora Online` | `Stenope Editor` |
+| Copyright text (line 186) | `Copyright © 2026, Collabora Productivity Limited.` | `Powered by Stenope.AI` |
+
+**`browser/dist/branding.js`** — Controls the loading screen splash text:
+
+| Variable | Before | After |
+|---|---|---|
+| `brandProductName` | `Collabora Online Development Edition (CODE)` | `Stenope Editor` |
+| `brandProductURL` | `https://www.collaboraonline.com/code/` | `https://stenope.ai` |
+
+### Important caveat
+
+A full `./build.sh` regenerates `cool.html` from the template `browser/html/cool.html.m4`, which **overwrites** branding changes. After a full rebuild, re-apply the branding:
+
+```bash
+cp browser/dist/cool.html.branded browser/dist/cool.html
+```
+
+Or edit the source template at `browser/html/cool.html.m4` to make branding permanent across full rebuilds.
+
+## 16. Fast Update: Hot-Swappable Files (No Full Rebuild)
+
+Some files are loaded as separate `<script>` tags in `cool.html` and do **not** require a full `./build.sh`. They can be updated by copying to `instdir` and rebuilding only the final Docker layer.
+
+### Hot-swappable files
+
+| File | Purpose |
+|---|---|
+| `browser/dist/src/map/handler/Map.WOPI.js` | WOPI message handler, audio shortcut interceptor |
+| `browser/dist/src/layer/marker/TextInput.js` | Text input handler, audio playback editing guard |
+| `browser/dist/src/control/Control.WordMeta.js` | Word metadata, timestamp navigation, highlighting |
+| `browser/dist/cool.html` | Page template, branding |
+| `browser/dist/branding.js` | Loading screen product name, logo URL |
+
+### Step-by-step: Update server image without full recompile
+
+**1. Copy source to dist (on Mac):**
+
+```bash
+cd ~/Desktop/Collabora-word-edittor
+cp browser/src/control/Control.WordMeta.js browser/dist/src/control/
+cp browser/src/layer/marker/TextInput.js browser/dist/src/layer/marker/
+cp browser/src/map/handler/Map.WOPI.js browser/dist/src/map/handler/
+```
+
+**2. Commit and push:**
+
+```bash
+git add -f browser/dist/src/control/Control.WordMeta.js \
+           browser/dist/src/layer/marker/TextInput.js \
+           browser/dist/src/map/handler/Map.WOPI.js \
+           browser/dist/cool.html
+git commit -m "update hot-swappable editor files"
+git push origin main
+```
+
+**3. On VM: pull and copy into instdir:**
+
+```bash
+ssh your-vm
+cd ~/Collabora-word-edittor
+git pull origin main
+
+DIST_DIR=$(find docker/from-source/instdir -name "cool.html" -type f | head -1 | xargs dirname)
+cp browser/dist/src/control/Control.WordMeta.js "$DIST_DIR/src/control/"
+cp browser/dist/src/layer/marker/TextInput.js "$DIST_DIR/src/layer/marker/"
+cp browser/dist/src/map/handler/Map.WOPI.js "$DIST_DIR/src/map/handler/"
+cp browser/dist/cool.html "$DIST_DIR/"
+```
+
+**4. Rebuild final Docker layer only (~2 min):**
+
+```bash
+cd ~/Collabora-word-edittor/docker/from-source
+cp ../from-packages/scripts/start-collabora-online.sh .
+docker build --no-cache -t collabora-ronit-version:latest -f Debian .
+```
+
+**5. Tag, push, and pull on Mac:**
+
+```bash
+# On VM
+docker tag collabora-ronit-version:latest ronitgandotra/collabora-ronit-version:latest
+docker push ronitgandotra/collabora-ronit-version:latest
+
+# On Mac
+docker pull --platform linux/amd64 ronitgandotra/collabora-ronit-version:latest
+```
+
+### When you DO need a full `./build.sh`
+
+Only when changing files bundled into `bundle.js` (e.g., `CanvasTileLayer.js`, core Leaflet files). The 4 hot-swappable files above never need it.

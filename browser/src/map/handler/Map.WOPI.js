@@ -66,6 +66,11 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		if (!this._map._speakerIndent) {
 			this._map._speakerIndent = null;
 		}
+		// Audio playback mode flag — when true, editing is blocked and
+		// audio shortcut keys are forwarded to the host.
+		if (this._map._audioPlaybackMode === undefined) {
+			this._map._audioPlaybackMode = false;
+		}
 	},
 
 	addHooks: function () {
@@ -109,6 +114,45 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		};
 		// Use capture phase to intercept before bubbling to TextInput
 		document.addEventListener('keydown', this._hotkeyInterceptor, true);
+
+		// Audio playback mode interceptor — blocks ALL keys and forwards audio shortcuts.
+		// Runs in capture phase so it fires before TextInput's keydown handler.
+		this._audioShortcutInterceptor = function (ev) {
+			if (!that._map || !that._map._audioPlaybackMode) return;
+
+			var key = ev.key;
+			var isAudioKey = false;
+
+			// Space = play/pause
+			if (key === ' ' || ev.code === 'Space') {
+				isAudioKey = true;
+			}
+			// Arrow keys (with or without Ctrl/Cmd) = navigation / skip
+			if (key === 'ArrowLeft' || key === 'ArrowRight' ||
+				key === 'ArrowUp' || key === 'ArrowDown') {
+				isAudioKey = true;
+			}
+
+			ev.preventDefault();
+			ev.stopPropagation();
+			ev.stopImmediatePropagation();
+
+			if (isAudioKey) {
+				console.log('[Map.WOPI] Audio shortcut intercepted:', key);
+				that._map.fire('postMessage', {
+					msgId: 'Audio_Shortcut',
+					args: {
+						key: key,
+						ctrlKey: !!ev.ctrlKey,
+						metaKey: !!ev.metaKey,
+						shiftKey: !!ev.shiftKey
+					}
+				});
+			}
+			// All non-audio keys are silently blocked (no editing)
+			return false;
+		};
+		document.addEventListener('keydown', this._audioShortcutInterceptor, true);
 
 		// Word-level click-to-seek: after mouseup, query WMETA bookmark under cursor.
 		this._wordSeekOnMouseUp = function (ev) {
@@ -180,6 +224,12 @@ window.L.Map.WOPI = window.L.Handler.extend({
 			this._hotkeyInterceptor = null;
 		}
 
+		// Remove audio shortcut interceptor
+		if (this._audioShortcutInterceptor) {
+			document.removeEventListener('keydown', this._audioShortcutInterceptor, true);
+			this._audioShortcutInterceptor = null;
+		}
+
 		if (this._wordSeekOnMouseUp) {
 			document.removeEventListener('mouseup', this._wordSeekOnMouseUp, true);
 			this._wordSeekOnMouseUp = null;
@@ -188,7 +238,7 @@ window.L.Map.WOPI = window.L.Handler.extend({
 			clearTimeout(this._wordSeekDebounceTimer);
 			this._wordSeekDebounceTimer = null;
 		}
-		},
+	},
 
 	// Return whether there is the capability to rename, not the permission.
 	// Since we fall back on Save As for rename isn't supported.
@@ -1196,6 +1246,8 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		else if (msg.MessageId === 'Audio_Playback_Mode') {
 			var enabled = msg.Values && msg.Values.enabled === true;
 			console.log('[Map.WOPI] Audio_Playback_Mode:', enabled);
+			// Set flag so interceptors can check it
+			this._map._audioPlaybackMode = enabled;
 			if (this._map.wordMeta) {
 				this._map.wordMeta.setAudioPlaybackMode(enabled);
 				this._postMessage({

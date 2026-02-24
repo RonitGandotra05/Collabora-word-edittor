@@ -2,7 +2,7 @@
 
 var brandProductName = 'Stenope Editor';
 var brandProductURL = 'https://stenope.ai';
-var brandProductFAQURL = 'https://www.collaboraonline.com/code/#code-scalability';
+var brandProductFAQURL = '';
 var menuItems;
 window.onload = function () {
 	// wait until the menu (and particularly the document-header) actually exists
