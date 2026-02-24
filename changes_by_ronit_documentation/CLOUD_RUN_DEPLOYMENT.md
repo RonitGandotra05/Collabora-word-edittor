@@ -83,6 +83,17 @@ export WOPI_HOST_URL="https://api.tisaproductions.com"
 | `extra_params` | `--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*` | Runtime stability flags + CSP frame-ancestors |
 | `aliasgroup1` | `https://api.tisaproductions.com` | Allowed WOPI host (security) |
 
+> [!CAUTION]
+> **ALWAYS include ALL required origins in `frame_ancestors` when updating env vars.**
+> The `--update-env-vars` command REPLACES the entire value — it does NOT merge with existing values.
+> If you omit any origin, that origin will lose the ability to embed the editor iframe.
+>
+> **Required origins (do NOT remove any):**
+> - `http://localhost:3000` — local development
+> - `https://spectacular-faun-b1b38e.netlify.app` — production Netlify frontend
+> - `https://api.tisaproductions.com` — backend WOPI host
+> - `collabora-ronit-version-140170437531.us-central1.run.app:*` — self-reference
+
 ---
 
 ## Prerequisites
