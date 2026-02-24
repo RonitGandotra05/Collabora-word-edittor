@@ -1,6 +1,11 @@
-# Deploying Collabora Online on Google Cloud Run
+# Deploying Stenope Editor (Collabora) on Google Cloud Run
 
-Complete guide for hosting the custom Collabora Docker image (`ronitgandotra/collabora-ronit-version`) on Google Cloud Run and connecting it to the Flask backend.
+Complete guide for hosting the custom Stenope Editor Docker image (`ronitgandotra/collabora-ronit-version`) on Google Cloud Run and connecting it to the Flask backend.
+
+**GitHub Repo:** `https://github.com/TisaLegalApps/Collabora-word-edittor.git`
+**Docker Hub Image:** `ronitgandotra/collabora-ronit-version:latest`
+**Cloud Run Service:** `collabora-ronit-version` (region: `us-central1`)
+**Cloud Run URL:** `https://collabora-ronit-version-140170437531.us-central1.run.app`
 
 ---
 
@@ -75,7 +80,7 @@ export WOPI_HOST_URL="https://api.tisaproductions.com"
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `extra_params` | `--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false` | Runtime stability flags |
+| `extra_params` | `--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*` | Runtime stability flags + CSP frame-ancestors |
 | `aliasgroup1` | `https://api.tisaproductions.com` | Allowed WOPI host (security) |
 
 ---
@@ -117,8 +122,11 @@ gcloud run deploy collabora-ronit-version \
   --max-instances 3 \
   --timeout 300 \
   --allow-unauthenticated \
-  --set-env-vars "extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false,aliasgroup1=https://api.tisaproductions.com"
+  --set-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
 ```
+
+> [!IMPORTANT]
+> Use `^|^` as the env-var separator (not `,`) because the `extra_params` value itself contains spaces. The `|` separates `extra_params` from `aliasgroup1`.
 
 ### Via GCP Console UI
 
@@ -232,9 +240,11 @@ sudo systemctl restart tisa-backend
 
 ---
 
-## Step 5: Update Cloud Run Service (If Needed)
+## Step 5: Update Cloud Run Service
 
-To change env vars, CPU, memory, or other settings:
+To change env vars, CPU, memory, or **force pull a new Docker image version**:
+
+### Update Settings Only
 
 ```bash
 gcloud run services update collabora-ronit-version \
@@ -245,10 +255,30 @@ gcloud run services update collabora-ronit-version \
   --timeout 300 \
   --min-instances 1 \
   --max-instances 3 \
-  --update-env-vars "extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false,aliasgroup1=https://api.tisaproductions.com"
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
 ```
 
-Verify env vars saved:
+### Force Pull a New Image (After docker push to Docker Hub)
+
+When you've pushed an updated image to Docker Hub with the same `latest` tag, add `--image` to force Cloud Run to pull it:
+
+```bash
+gcloud run services update collabora-ronit-version \
+  --region us-central1 \
+  --image docker.io/ronitgandotra/collabora-ronit-version:latest \
+  --port 9980 \
+  --cpu 2 \
+  --memory 2Gi \
+  --timeout 300 \
+  --min-instances 1 \
+  --max-instances 3 \
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
+```
+
+> [!IMPORTANT]
+> Without `--image`, Cloud Run will NOT re-pull the `latest` tag — it uses the cached version. Always include `--image` after pushing a new image to Docker Hub.
+
+### Verify env vars saved:
 
 ```bash
 gcloud run services describe collabora-ronit-version \
@@ -334,7 +364,7 @@ Refused to frame '...' because an ancestor violates the Content Security Policy 
 ```bash
 gcloud run services update collabora-ronit-version \
   --region us-central1 \
-  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=*|aliasgroup1=https://api.tisaproductions.com"
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
 ```
 
 Verify the CSP:
@@ -435,9 +465,10 @@ Collabora reads/writes files here via WOPI. Electron downloads a local copy on e
 # Set project
 gcloud config set project vivid-env-425623-i6
 
-# Deploy/update Collabora (with frame_ancestors for all allowed origins)
+# Deploy/update Collabora (force pull new image + set all env vars)
 gcloud run services update collabora-ronit-version \
   --region us-central1 \
+  --image docker.io/ronitgandotra/collabora-ronit-version:latest \
   --port 9980 \
   --cpu 2 \
   --memory 2Gi \

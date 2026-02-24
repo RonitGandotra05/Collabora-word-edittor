@@ -1,47 +1,47 @@
 # Updating the Server Docker Image (Without Full Rebuild)
 
-This guide covers how to apply hot-swappable changes to the existing `ronitgandotra/collabora-ronit-version` Docker Hub image without running a full `./build.sh`. You are **updating the same image tag** — no new image name needed.
+This guide covers how to apply hot-swappable changes to the existing `ronitgandotra/collabora-ronit-version` Docker Hub image without running a full `./build.sh`. You update the **same image tag** — no new image needed.
 
-## When to Use This Guide
+**GitHub Repo:** `https://github.com/TisaLegalApps/Collabora-word-edittor.git`
+**Docker Hub Image:** `ronitgandotra/collabora-ronit-version:latest`
+**Cloud Run Service:** `collabora-ronit-version` (region: `us-central1`)
+**Cloud Run URL:** `https://collabora-ronit-version-140170437531.us-central1.run.app`
 
-Use this when you have made changes to **hot-swappable files** — files loaded as separate `<script>` tags in `cool.html` that are NOT bundled into `bundle.js`. These files can be swapped by copying them into the compiled `instdir` and rebuilding only the final Docker packaging layer.
+## Hot-Swappable Files
 
-## Files Changed in This Update
+These files are loaded as separate `<script>` tags in `cool.html` (NOT bundled into `bundle.js`), so they can be replaced without recompiling:
 
-| File | What Changed |
+| File | Purpose |
 |---|---|
-| `browser/dist/src/control/Control.WordMeta.js` | Half-open interval fix for `findWordByTime` (off-by-one highlighting) |
-| `browser/dist/src/layer/marker/TextInput.js` | Audio playback editing guard (prevents typing during playback) |
-| `browser/dist/src/map/handler/Map.WOPI.js` | Audio shortcut interceptor (arrow keys for word navigation) |
-| `browser/dist/cool.html` | Stenope branding, disabled welcome/feedback/update popups |
-| `browser/dist/branding.js` | Loading screen: "Stenope Editor" instead of "Collabora Online Development Edition (CODE)" |
+| `browser/dist/src/control/Control.WordMeta.js` | Word timestamp navigation, highlighting, `findWordByTime` |
+| `browser/dist/src/layer/marker/TextInput.js` | Text input handler, audio playback editing guard |
+| `browser/dist/src/map/handler/Map.WOPI.js` | WOPI message handler, audio shortcut interceptor |
+| `browser/dist/cool.html` | Page template, Stenope branding, popup disable flags |
+| `browser/dist/branding.js` | Loading screen product name and URLs |
 
-## Prerequisites
+---
 
-- SSH access to your build VM (where the original image was built)
-- The `docker/from-source/instdir` directory still exists on the VM from the last full build
-- Docker Hub login credentials
+## Method: docker cp + docker commit (Recommended)
 
-## Step-by-Step Instructions
+This is the fastest approach. Works from your **Mac directly** — no build VM needed.
 
-### Step 1: Push Changes from Mac to GitHub
-
-On your Mac:
+### Step 1: Push Code Changes to GitHub
 
 ```bash
 cd ~/Desktop/Collabora-word-edittor
 
-# Copy source files to dist
+# Copy source files to dist (so dist mirrors src)
 cp browser/src/control/Control.WordMeta.js browser/dist/src/control/
 cp browser/src/layer/marker/TextInput.js browser/dist/src/layer/marker/
 cp browser/src/map/handler/Map.WOPI.js browser/dist/src/map/handler/
 
-# Stage everything (force-add gitignored dist files)
+# Stage tracked source files + documentation
 git add browser/src/control/Control.WordMeta.js \
         browser/src/layer/marker/TextInput.js \
         browser/src/map/handler/Map.WOPI.js \
         changes_by_ronit_documentation/
 
+# Force-add gitignored dist files
 git add -f browser/dist/src/control/Control.WordMeta.js \
            browser/dist/src/layer/marker/TextInput.js \
            browser/dist/src/map/handler/Map.WOPI.js \
@@ -49,211 +49,17 @@ git add -f browser/dist/src/control/Control.WordMeta.js \
            browser/dist/branding.js
 
 # Commit and push
-git commit -m "feat: Stenope branding, audio nav fixes, feedback disabled"
+git commit -m "feat: update editor files and branding"
 git push origin main
 ```
 
-### Step 2: SSH into the Build VM and Pull
-
-```bash
-ssh your-vm-address
-cd ~/Collabora-word-edittor
-git pull origin main
-```
-
-### Step 3: Find the instdir dist directory
-
-The compiled output from the last full build lives in `docker/from-source/instdir`. Find where `cool.html` is inside it:
-
-```bash
-DIST_DIR=$(find ~/Collabora-word-edittor/docker/from-source/instdir -name "cool.html" -type f | head -1 | xargs dirname)
-echo "Dist directory inside instdir: $DIST_DIR"
-```
-
-Expected output example:
-```
-Dist directory inside instdir: /home/ronitgandotra/Collabora-word-edittor/docker/from-source/instdir/opt/cool/share/coolwsd/browser/dist
-```
-
-If this returns empty, your `instdir` was deleted. You would need a full `./build.sh` rebuild (see `DOCKER_IMAGE_BUILD_GUIDE.md`).
-
-### Step 4: Copy Updated Files into instdir
-
-```bash
-# Hot-swappable JS files
-cp browser/dist/src/control/Control.WordMeta.js "$DIST_DIR/src/control/"
-cp browser/dist/src/layer/marker/TextInput.js "$DIST_DIR/src/layer/marker/"
-cp browser/dist/src/map/handler/Map.WOPI.js "$DIST_DIR/src/map/handler/"
-
-# Branding files
-cp browser/dist/cool.html "$DIST_DIR/"
-cp browser/dist/branding.js "$DIST_DIR/"
-```
-
-Verify the copies:
-
-```bash
-echo "--- Verifying copies ---"
-ls -la "$DIST_DIR/src/control/Control.WordMeta.js"
-ls -la "$DIST_DIR/src/layer/marker/TextInput.js"
-ls -la "$DIST_DIR/src/map/handler/Map.WOPI.js"
-ls -la "$DIST_DIR/cool.html"
-ls -la "$DIST_DIR/branding.js"
-
-# Verify branding content
-grep "brandProductName" "$DIST_DIR/branding.js"
-grep "<title>" "$DIST_DIR/cool.html"
-```
-
-Expected:
-```
-var brandProductName = 'Stenope Editor';
-<title>Stenope Editor</title>
-```
-
-### Step 5: Rebuild the Final Docker Layer (~2 minutes)
-
-This only repackages the already-compiled `instdir` into a Docker image. No recompilation.
-
-```bash
-cd ~/Collabora-word-edittor/docker/from-source
-
-# Copy the startup script (required by the Dockerfile)
-cp ../from-packages/scripts/start-collabora-online.sh .
-
-# Build ONLY the final Docker layer
-docker build --no-cache -t collabora-ronit-version:latest -f Debian .
-```
-
-Verify the image was built:
-
-```bash
-docker images | grep collabora-ronit-version
-```
-
-### Step 6: Tag and Push to Docker Hub
-
-```bash
-# Login if needed
-docker login
-
-# Tag with your Docker Hub username
-docker tag collabora-ronit-version:latest ronitgandotra/collabora-ronit-version:latest
-
-# Push
-docker push ronitgandotra/collabora-ronit-version:latest
-```
-
-Wait for the push to complete. Expected success output:
-```
-latest: digest: sha256:... size: ...
-```
-
-### Step 7: Pull and Run on Mac (Local Testing)
-
-```bash
-# Pull the updated image
-docker pull --platform linux/amd64 ronitgandotra/collabora-ronit-version:latest
-
-# Stop the current container using port 9980
-docker stop collabora-code
-
-# Remove any old version of this container
-docker rm -f collabora-ronit-version 2>/dev/null || true
-
-# Run the updated image
-docker run -d --name collabora-ronit-version \
-  --platform linux/amd64 \
-  -p 9980:9980 \
-  --cap-add MKNOD \
-  -e 'aliasgroup1=https://.*' \
-  -e 'extra_params=--o:ssl.enable=false --o:ssl.termination=false --o:security.seccomp=false --o:mount_jail_tree=false' \
-  ronitgandotra/collabora-ronit-version:latest
-```
-
-**Important:** Do NOT bind-mount `browser/dist` when running the baked image. The files are already inside it.
-
-Verify it's running:
-
-```bash
-docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}"
-docker logs --tail=20 collabora-ronit-version
-```
-
-### Step 8: Deploy to Cloud Run (Production)
-
-If you deploy to Cloud Run, update the service to use the new image:
-
-```bash
-gcloud run deploy collabora-service \
-  --image=ronitgandotra/collabora-ronit-version:latest \
-  --platform=managed \
-  --region=us-central1 \
-  --port=9980 \
-  --allow-unauthenticated \
-  --set-env-vars="aliasgroup1=https://.*,extra_params=--o:ssl.enable=false --o:ssl.termination=false --o:security.seccomp=false --o:mount_jail_tree=false"
-```
-
-Or pull and redeploy via the Cloud Run console.
-
-### Step 9: Switch Back to Local Dev Container
-
-If you want to go back to local development with bind-mounted `browser/dist`:
-
-```bash
-docker stop collabora-ronit-version
-docker start collabora-code
-```
-
-## Verification Checklist
-
-After deploying, open the editor and verify:
-
-- [ ] Loading screen shows **"Stenope Editor"** (not Collabora)
-- [ ] Browser tab title says **"Stenope Editor"**
-- [ ] About dialog shows **"Stenope Editor"** and **"Powered by Stenope.AI"**
-- [ ] No welcome popup on first load
-- [ ] No feedback popup
-- [ ] Click-to-seek highlights the correct word (not off-by-one)
-- [ ] Arrow key navigation moves one word at a time (not skipping)
-- [ ] Typing is blocked during audio playback mode
-
-## FAQ
-
-### Do I need a new Docker Hub image name?
-
-No. Push to the same `ronitgandotra/collabora-ronit-version:latest` tag. Docker Hub overwrites the tag with the new image.
-
-### What if `instdir` was deleted on the VM?
-
-You need a full `./build.sh` rebuild. See `DOCKER_IMAGE_BUILD_GUIDE.md` Section 5.
-
-### What if I run `./build.sh` again later?
-
-A full build regenerates `cool.html` and `branding.js` from templates, overwriting your branding. After a full build, re-run Steps 4-6 to re-apply the branding.
-
-### Can I use `docker cp` instead of rebuilding?
-
-For temporary testing, yes:
-```bash
-docker cp browser/dist/branding.js collabora-ronit-version:/usr/share/coolwsd/browser/dist/
-docker restart collabora-ronit-version
-```
-But this doesn't persist in the image — use the full Steps 4-6 for a permanent update.
-
-## Alternative: VM Deleted / No instdir Available
-
-If you deleted the build VM and no longer have `instdir`, you do NOT need a full multi-hour `./build.sh`. Instead, patch the existing Docker Hub image directly using `docker cp` + `docker commit`.
-
-This can be done from **any machine with Docker** (your Mac, a new VM, etc.).
-
-### Step A1: Pull the Existing Image
+### Step 2: Pull the Existing Docker Hub Image
 
 ```bash
 docker pull --platform linux/amd64 ronitgandotra/collabora-ronit-version:latest
 ```
 
-### Step A2: Run a Temporary Container
+### Step 3: Start a Temporary Container
 
 ```bash
 docker rm -f collabora-temp 2>/dev/null || true
@@ -262,64 +68,128 @@ docker run -d --name collabora-temp \
   ronitgandotra/collabora-ronit-version:latest
 ```
 
-### Step A3: Copy Updated Files into the Container
+### Step 4: Create Missing Directories (as root)
 
-From your Collabora-word-edittor repo on Mac:
+The baked image only has `src/layer/tile/`. The other directories don't exist and must be created:
+
+```bash
+docker exec -u root collabora-temp mkdir -p \
+  /usr/share/coolwsd/browser/dist/src/control \
+  /usr/share/coolwsd/browser/dist/src/map/handler \
+  /usr/share/coolwsd/browser/dist/src/layer/marker
+```
+
+### Step 5: Copy All 5 Files into the Container
 
 ```bash
 cd ~/Desktop/Collabora-word-edittor
 
-# Find the dist path inside the container
-DIST_PATH=$(docker exec collabora-temp find /usr/share/coolwsd -name "cool.html" -type f | head -1 | xargs dirname)
-echo "Container dist path: $DIST_PATH"
+DIST=/usr/share/coolwsd/browser/dist
+
+docker cp browser/dist/src/control/Control.WordMeta.js collabora-temp:$DIST/src/control/
+docker cp browser/dist/src/layer/marker/TextInput.js collabora-temp:$DIST/src/layer/marker/
+docker cp browser/dist/src/map/handler/Map.WOPI.js collabora-temp:$DIST/src/map/handler/
+docker cp browser/dist/cool.html collabora-temp:$DIST/
+docker cp browser/dist/branding.js collabora-temp:$DIST/
 ```
 
-Expected: `/usr/share/coolwsd/browser/dist`
+### Step 6: Verify the Files Are Correct
 
 ```bash
-# Copy all 5 hot-swappable files
-docker cp browser/dist/src/control/Control.WordMeta.js collabora-temp:$DIST_PATH/src/control/
-docker cp browser/dist/src/layer/marker/TextInput.js collabora-temp:$DIST_PATH/src/layer/marker/
-docker cp browser/dist/src/map/handler/Map.WOPI.js collabora-temp:$DIST_PATH/src/map/handler/
-docker cp browser/dist/cool.html collabora-temp:$DIST_PATH/
-docker cp browser/dist/branding.js collabora-temp:$DIST_PATH/
-```
-
-Verify:
-
-```bash
-docker exec collabora-temp grep "brandProductName" $DIST_PATH/branding.js
-docker exec collabora-temp grep "<title>" $DIST_PATH/cool.html
+docker exec collabora-temp grep "brandProductName" /usr/share/coolwsd/browser/dist/branding.js
+docker exec collabora-temp grep "<title>" /usr/share/coolwsd/browser/dist/cool.html
+docker exec collabora-temp grep "Control.WordMeta\|Map.WOPI\|TextInput" /usr/share/coolwsd/browser/dist/cool.html
 ```
 
 Expected:
 ```
 var brandProductName = 'Stenope Editor';
 <title>Stenope Editor</title>
+  <script defer src="...Map.WOPI.js"></script>
+  <script defer src="...Control.WordMeta.js"></script>
+  <script defer src="...TextInput.js"></script>
 ```
 
-### Step A4: Commit the Container as a New Image
+### Step 7: Commit as New Image
 
 ```bash
 docker commit collabora-temp ronitgandotra/collabora-ronit-version:latest
 ```
 
-This creates a new image layer with your changes baked in.
+This takes ~2 minutes. Creates a new image with all changes baked in.
 
-### Step A5: Push to Docker Hub
+### Step 8: Push to Docker Hub
 
 ```bash
 docker login
 docker push ronitgandotra/collabora-ronit-version:latest
 ```
 
-### Step A6: Clean Up the Temporary Container
+This takes ~5-10 minutes depending on upload speed. Wait for:
+```
+latest: digest: sha256:... size: ...
+```
+
+### Step 9: Clean Up Temp Container
 
 ```bash
 docker rm -f collabora-temp
 ```
 
-### Step A7: Run the Updated Image
+---
+
+## Deploy to Cloud Run (Production)
+
+After pushing to Docker Hub, force Cloud Run to pull the new image:
+
+### Update the Service
+
+```bash
+gcloud run services update collabora-ronit-version \
+  --region us-central1 \
+  --image docker.io/ronitgandotra/collabora-ronit-version:latest \
+  --port 9980 \
+  --cpu 2 \
+  --memory 2Gi \
+  --timeout 300 \
+  --min-instances 1 \
+  --max-instances 3 \
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
+```
+
+> **Note:** The `--image` flag forces Cloud Run to pull the updated image even though the tag name (`latest`) is the same.
+
+### Verify Deployment
+
+```bash
+# Check HTTP response
+curl -I https://collabora-ronit-version-140170437531.us-central1.run.app/hosting/discovery
+
+# Verify branding
+curl -s https://collabora-ronit-version-140170437531.us-central1.run.app/browser/dist/branding.js | head -5
+
+# Check logs for errors
+gcloud run services logs read collabora-ronit-version --region us-central1 --limit 50
+
+# Describe service config
+gcloud run services describe collabora-ronit-version --region us-central1 \
+  --format="flattened(spec.template.spec.containers[0].env)"
+```
+
+### Make Public (only needed on first deploy)
+
+```bash
+gcloud run services add-iam-policy-binding collabora-ronit-version \
+  --region=us-central1 \
+  --member="allUsers" \
+  --role="roles/run.invoker"
+```
+
+---
+
+## Run Locally on Mac (Testing)
+
+### Option A: Run the Baked Image (no bind mount)
 
 ```bash
 docker stop collabora-code 2>/dev/null || true
@@ -334,4 +204,49 @@ docker run -d --name collabora-ronit-version \
   ronitgandotra/collabora-ronit-version:latest
 ```
 
-This approach works from your Mac directly — no VM needed.
+### Option B: Switch Back to Dev Container (with bind mount)
+
+```bash
+docker stop collabora-ronit-version
+docker start collabora-code
+```
+
+---
+
+## Verification Checklist
+
+After deploying, open the editor and verify:
+
+- [ ] Loading screen shows **"Stenope Editor"** (not "Collabora Online Development Edition")
+- [ ] Browser tab title says **"Stenope Editor"**
+- [ ] About dialog shows **"Stenope Editor"** and **"Powered by Stenope.AI"**
+- [ ] No welcome popup on first load
+- [ ] No feedback popup
+- [ ] No update notification popup
+- [ ] Click-to-seek highlights the correct word (not off-by-one)
+- [ ] Arrow key navigation moves one word at a time (not skipping)
+- [ ] Typing is blocked during audio playback mode
+
+---
+
+## FAQ
+
+### Do I need a new Docker Hub image name?
+
+No. Push to the same `ronitgandotra/collabora-ronit-version:latest`. Docker Hub overwrites the tag.
+
+### Why `docker exec -u root mkdir` in Step 4?
+
+The baked image's `browser/dist/src/` only contains `layer/tile/`. The `control/`, `map/handler/`, and `layer/marker/` directories don't exist. Creating them requires root permissions inside the container.
+
+### What if I run `./build.sh` again later?
+
+A full build regenerates `cool.html` and `branding.js` from templates, overwriting branding. Re-run Steps 4-9 to re-apply.
+
+### When DO I need a full `./build.sh`?
+
+Only when changing files bundled into `bundle.js` (e.g., `CanvasTileLayer.js`, core Leaflet files). The 5 hot-swappable files listed above never need it.
+
+### Can I do this from any machine?
+
+Yes. The `docker cp` + `docker commit` approach works from any machine with Docker and access to your repo. No VM or `instdir` needed.
