@@ -661,10 +661,12 @@ window.L.TextInput = window.L.Layer.extend({
 	_onBeforeInput: function (ev) {
 		if (this._map.uiManager.isUIBlocked())
 			return;
-		// Block all text mutation during audio playback mode
-		if (this._map && this._map._audioPlaybackMode) {
+		if (this._map && this._map._audioPlaybackPlaying && this._map._hotkeyMode && this._map._hotkeyMode.enabled) {
 			ev.preventDefault();
 			return;
+		}
+		if (this._map && this._map._audioPlaybackMode) {
+			this._clearPlaybackSelectionForEditing();
 		}
 		this._statusLog('_onBeforeInput [');
 		this._ignoreNextBackspace = false;
@@ -690,6 +692,41 @@ window.L.TextInput = window.L.Layer.extend({
 		return asciiChar >= 48 && asciiChar <= 57;
 	},
 
+	_clearPlaybackSelectionForEditing: function () {
+		if (!this._map || !this._map._audioPlaybackMode)
+			return;
+
+		if (app && app.activeDocument && app.activeDocument.activeView && app.activeDocument.activeView.hasTextSelection)
+			return;
+
+		var wordMeta = this._map.wordMeta;
+		if (wordMeta && typeof wordMeta.clearTransientPlaybackSelection === 'function') {
+			wordMeta.clearTransientPlaybackSelection();
+			return;
+		}
+		if (wordMeta && typeof wordMeta.clearPlaybackSelection === 'function') {
+			wordMeta.clearPlaybackSelection();
+			return;
+		}
+
+		if (app && app.activeDocument && app.activeDocument.activeView)
+			app.activeDocument.activeView.clearTextSelection();
+		if (this._map && typeof this._map.fire === 'function')
+			this._map.fire('clearselection');
+		if (app && app.socket && typeof app.socket.sendMessage === 'function')
+			app.socket.sendMessage('resetselection');
+	},
+
+	_isAudioPlaybackEditIntent: function (ev) {
+		if (!ev)
+			return false;
+		if (ev.isComposing)
+			return true;
+		if (ev.key === 'Backspace' || ev.key === 'Delete' || ev.key === 'Enter')
+			return true;
+		return !!(ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey);
+	},
+
 	_hasFormulaBarFocus: function () {
 		return this._map && this._map.formulabar && this._map.formulabar.hasFocus();
 	},
@@ -698,10 +735,8 @@ window.L.TextInput = window.L.Layer.extend({
 	_onInput: function (ev) {
 		if (this._map.uiManager.isUIBlocked())
 			return;
-		// Block all text input during audio playback mode
-		if (this._map && this._map._audioPlaybackMode) {
+		if (this._map && this._map._audioPlaybackPlaying && this._map._hotkeyMode && this._map._hotkeyMode.enabled)
 			return;
-		}
 		this._statusLog('_onInput [');
 		app.idleHandler.notifyActive();
 
@@ -992,11 +1027,12 @@ window.L.TextInput = window.L.Layer.extend({
 	_onKeyDown: function (ev) {
 		if (this._map.uiManager.isUIBlocked())
 			return;
-		// During audio playback, the document-level interceptor in Map.WOPI
-		// handles everything. If an event leaks through, block it here too.
-		if (this._map && this._map._audioPlaybackMode) {
+		if (this._map && this._map._audioPlaybackPlaying && this._map._hotkeyMode && this._map._hotkeyMode.enabled) {
 			ev.preventDefault();
 			return;
+		}
+		if (this._map && this._map._audioPlaybackMode && this._isAudioPlaybackEditIntent(ev)) {
+			this._clearPlaybackSelectionForEditing();
 		}
 		var hotkeyMode = this._map && this._map._hotkeyMode;
 		// Debug logging for hotkey mode

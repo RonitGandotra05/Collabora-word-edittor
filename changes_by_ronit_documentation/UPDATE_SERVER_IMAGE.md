@@ -3,7 +3,7 @@
 This guide covers how to apply hot-swappable changes to the existing `ronitgandotra/collabora-ronit-version` Docker Hub image without running a full `./build.sh`. You update the **same image tag** — no new image needed.
 
 **GitHub Repo:** `https://github.com/TisaLegalApps/Collabora-word-edittor.git`
-**Docker Hub Image:** `ronitgandotra/collabora-ronit-version:latest`
+**Docker Hub Image:** `ronitgandotra/collabora-ronit-version:v2.0-editing-enabled`
 **Cloud Run Service:** `collabora-ronit-version` (region: `us-central1`)
 **Cloud Run URL:** `https://collabora-ronit-version-140170437531.us-central1.run.app`
 
@@ -14,6 +14,7 @@ These files are loaded as separate `<script>` tags in `cool.html` (NOT bundled i
 | File | Purpose |
 |---|---|
 | `browser/dist/src/control/Control.WordMeta.js` | Word timestamp navigation, highlighting, `findWordByTime` |
+| `browser/dist/src/control/Control.DocumentNameInput.js` | Title bar name/path display override (hides file path) |
 | `browser/dist/src/layer/marker/TextInput.js` | Text input handler, audio playback editing guard |
 | `browser/dist/src/map/handler/Map.WOPI.js` | WOPI message handler, audio shortcut interceptor |
 | `browser/dist/cool.html` | Page template, Stenope branding, popup disable flags |
@@ -32,17 +33,20 @@ cd ~/Desktop/Collabora-word-edittor
 
 # Copy source files to dist (so dist mirrors src)
 cp browser/src/control/Control.WordMeta.js browser/dist/src/control/
+cp browser/src/control/Control.DocumentNameInput.js browser/dist/src/control/
 cp browser/src/layer/marker/TextInput.js browser/dist/src/layer/marker/
 cp browser/src/map/handler/Map.WOPI.js browser/dist/src/map/handler/
 
 # Stage tracked source files + documentation
 git add browser/src/control/Control.WordMeta.js \
+        browser/src/control/Control.DocumentNameInput.js \
         browser/src/layer/marker/TextInput.js \
         browser/src/map/handler/Map.WOPI.js \
         changes_by_ronit_documentation/
 
 # Force-add gitignored dist files
 git add -f browser/dist/src/control/Control.WordMeta.js \
+           browser/dist/src/control/Control.DocumentNameInput.js \
            browser/dist/src/layer/marker/TextInput.js \
            browser/dist/src/map/handler/Map.WOPI.js \
            browser/dist/cool.html \
@@ -56,7 +60,7 @@ git push origin main
 ### Step 2: Pull the Existing Docker Hub Image
 
 ```bash
-docker pull --platform linux/amd64 ronitgandotra/collabora-ronit-version:latest
+docker pull --platform linux/amd64 ronitgandotra/collabora-ronit-version:v2.0-editing-enabled
 ```
 
 ### Step 3: Start a Temporary Container
@@ -65,7 +69,7 @@ docker pull --platform linux/amd64 ronitgandotra/collabora-ronit-version:latest
 docker rm -f collabora-temp 2>/dev/null || true
 docker run -d --name collabora-temp \
   --platform linux/amd64 \
-  ronitgandotra/collabora-ronit-version:latest
+  ronitgandotra/collabora-ronit-version:v2.0-editing-enabled
 ```
 
 ### Step 4: Create Missing Directories (as root)
@@ -79,7 +83,7 @@ docker exec -u root collabora-temp mkdir -p \
   /usr/share/coolwsd/browser/dist/src/layer/marker
 ```
 
-### Step 5: Copy All 5 Files into the Container
+### Step 5: Copy All 6 Files into the Container
 
 ```bash
 cd ~/Desktop/Collabora-word-edittor
@@ -87,6 +91,7 @@ cd ~/Desktop/Collabora-word-edittor
 DIST=/usr/share/coolwsd/browser/dist
 
 docker cp browser/dist/src/control/Control.WordMeta.js collabora-temp:$DIST/src/control/
+docker cp browser/dist/src/control/Control.DocumentNameInput.js collabora-temp:$DIST/src/control/
 docker cp browser/dist/src/layer/marker/TextInput.js collabora-temp:$DIST/src/layer/marker/
 docker cp browser/dist/src/map/handler/Map.WOPI.js collabora-temp:$DIST/src/map/handler/
 docker cp browser/dist/cool.html collabora-temp:$DIST/
@@ -98,7 +103,7 @@ docker cp browser/dist/branding.js collabora-temp:$DIST/
 ```bash
 docker exec collabora-temp grep "brandProductName" /usr/share/coolwsd/browser/dist/branding.js
 docker exec collabora-temp grep "<title>" /usr/share/coolwsd/browser/dist/cool.html
-docker exec collabora-temp grep "Control.WordMeta\|Map.WOPI\|TextInput" /usr/share/coolwsd/browser/dist/cool.html
+docker exec collabora-temp grep "Control.WordMeta\|Map.WOPI\|TextInput\|DocumentNameInput" /usr/share/coolwsd/browser/dist/cool.html
 ```
 
 Expected:
@@ -113,7 +118,7 @@ var brandProductName = 'Stenope Editor';
 ### Step 7: Commit as New Image
 
 ```bash
-docker commit collabora-temp ronitgandotra/collabora-ronit-version:latest
+docker commit collabora-temp ronitgandotra/collabora-ronit-version:v2.0-editing-enabled
 ```
 
 This takes ~2 minutes. Creates a new image with all changes baked in.
@@ -122,7 +127,7 @@ This takes ~2 minutes. Creates a new image with all changes baked in.
 
 ```bash
 docker login
-docker push ronitgandotra/collabora-ronit-version:latest
+docker push ronitgandotra/collabora-ronit-version:v2.0-editing-enabled
 ```
 
 This takes ~5-10 minutes depending on upload speed. Wait for:
@@ -147,17 +152,17 @@ After pushing to Docker Hub, force Cloud Run to pull the new image:
 ```bash
 gcloud run services update collabora-ronit-version \
   --region us-central1 \
-  --image docker.io/ronitgandotra/collabora-ronit-version:latest \
+  --image docker.io/ronitgandotra/collabora-ronit-version:v2.0-editing-enabled \
   --port 9980 \
   --cpu 2 \
   --memory 2Gi \
   --timeout 300 \
   --min-instances 1 \
   --max-instances 3 \
-  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=*|aliasgroup1=https://api.tisaproductions.com"
 ```
 
-> **Note:** The `--image` flag forces Cloud Run to pull the updated image even though the tag name (`latest`) is the same.
+> **Note:** The `--image` flag forces Cloud Run to pull the updated image even though the tag name (`v2.0-editing-enabled`) is the same.
 
 ### Verify Deployment
 
@@ -201,7 +206,7 @@ docker run -d --name collabora-ronit-version \
   --cap-add MKNOD \
   -e 'aliasgroup1=https://.*' \
   -e 'extra_params=--o:ssl.enable=false --o:ssl.termination=false --o:security.seccomp=false --o:mount_jail_tree=false' \
-  ronitgandotra/collabora-ronit-version:latest
+  ronitgandotra/collabora-ronit-version:v2.0-editing-enabled
 ```
 
 ### Option B: Switch Back to Dev Container (with bind mount)
@@ -233,7 +238,7 @@ After deploying, open the editor and verify:
 
 ### Do I need a new Docker Hub image name?
 
-No. Push to the same `ronitgandotra/collabora-ronit-version:latest`. Docker Hub overwrites the tag.
+No. Push to the same `ronitgandotra/collabora-ronit-version:v2.0-editing-enabled`. Docker Hub overwrites the tag.
 
 ### Why `docker exec -u root mkdir` in Step 4?
 

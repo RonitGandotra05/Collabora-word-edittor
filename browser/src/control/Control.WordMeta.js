@@ -63,6 +63,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
     _originalContextToolbarShow: null,
     _pendingCursorBookmarkLookup: null,
     _pendingCursorBookmarkTimer: null,
+    _playbackHighlightSection: null,
     _cursorSeekTimeoutMs: 700,
 
     // Bookmark naming prefix
@@ -94,6 +95,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
         this._originalContextToolbarShow = null;
         this._pendingCursorBookmarkLookup = null;
         this._pendingCursorBookmarkTimer = null;
+        this._playbackHighlightSection = null;
 
         // Register this control on the map for easy access
         map.wordMeta = this;
@@ -870,6 +872,7 @@ window.L.Control.WordMeta = window.L.Control.extend({
 
         this._log('debug', 'WordMeta: Highlighting word index ' + wordIndex + ' via bookmark ' + bookmarkName);
         this._clearHighlight();
+        var cursorState = this._captureCursorState();
         var params = {
             'Bookmark': {
                 'type': 'string',
@@ -885,15 +888,12 @@ window.L.Control.WordMeta = window.L.Control.extend({
         setTimeout(function () {
             that.map.sendUnoCommand('.uno:SelectWord', null, true);
             setTimeout(function () {
-                // Always mark as complete after SelectWord attempt
-                // DO NOT fallback to text search - it highlights ALL occurrences of the word
-                // which causes duplicate words to highlight simultaneously
                 that._highlightSearchActive = false;
-                that._hasActiveHighlight = that._hasTextSelection();
+                that._hasActiveHighlight = that._promoteSelectionToPlaybackOverlay(cursorState);
                 that._resumeIndexing();
 
                 if (!that._hasActiveHighlight) {
-                    that._log('debug', 'WordMeta: SelectWord did not create selection for index ' + wordIndex + ', but NOT falling back to text search to avoid multi-highlight bug');
+                    that._log('debug', 'WordMeta: SelectWord did not create overlay highlight for index ' + wordIndex);
                 }
             }, that._highlightJumpDelayMs);
         }, this._highlightJumpDelayMs);
@@ -955,14 +955,115 @@ window.L.Control.WordMeta = window.L.Control.extend({
         if (app && app.searchService && typeof app.searchService.resetSelection === 'function') {
             app.searchService.resetSelection();
         }
+        this._hidePlaybackOverlay();
+        this._clearDocumentSelection();
+        this._hasActiveHighlight = false;
+    },
+
+    _clearDocumentSelection: function () {
         if (app && app.activeDocument && app.activeDocument.activeView) {
             app.activeDocument.activeView.clearTextSelection();
         }
-        // Also clear via map fire to ensure all highlight overlays are removed
         if (this.map) {
             this.map.fire('clearselection');
         }
-        this._hasActiveHighlight = false;
+    },
+
+    _ensurePlaybackHighlightSection: function () {
+        if (this._playbackHighlightSection) {
+            return this._playbackHighlightSection;
+        }
+
+        var activeView = app && app.activeDocument && app.activeDocument.activeView;
+        var liveSection = activeView && activeView.selectionSection;
+        var SectionCtor = liveSection && liveSection.constructor;
+        if (!SectionCtor) {
+            return null;
+        }
+
+        var section = new SectionCtor('wordmeta-playback-highlight', 0, 0, liveSection.color);
+        app.sectionContainer.addSection(section);
+        section.setShowSection(false);
+        this._playbackHighlightSection = section;
+        return section;
+    },
+
+    _hidePlaybackOverlay: function () {
+        if (this._playbackHighlightSection) {
+            this._playbackHighlightSection.setSelectionInfo(0, 0, []);
+            this._playbackHighlightSection.setShowSection(false);
+        }
+    },
+
+    _cloneSelectionPolygons: function (polygons) {
+        if (!Array.isArray(polygons)) {
+            return [];
+        }
+
+        return polygons.map(function (polygon) {
+            if (!Array.isArray(polygon)) {
+                return [];
+            }
+            return polygon.map(function (point) {
+                return new cool.SimplePoint(point.x, point.y, point.part);
+            });
+        });
+    },
+
+    _captureCursorState: function () {
+        var rect = app && app.file && app.file.textCursor && app.file.textCursor.rectangle;
+        if (!rect || !app.file.textCursor.visible) {
+            return null;
+        }
+
+        return {
+            x: Math.round(rect.center[0]),
+            y: Math.round(rect.center[1])
+        };
+    },
+
+    _restoreCursorState: function (cursorState) {
+        if (!cursorState || !this.map || !this.map._docLayer || typeof this.map._docLayer._postMouseEvent !== 'function') {
+            return;
+        }
+
+        this.map._docLayer._postMouseEvent('buttondown', cursorState.x, cursorState.y, 1, 1, 0);
+        this.map._docLayer._postMouseEvent('buttonup', cursorState.x, cursorState.y, 1, 1, 0);
+
+        if (typeof this.map.focus === 'function') {
+            this.map.focus(false);
+        }
+    },
+
+    _promoteSelectionToPlaybackOverlay: function (cursorState) {
+        if (!this._hasTextSelection()) {
+            return false;
+        }
+
+        var activeView = app && app.activeDocument && app.activeDocument.activeView;
+        var liveSection = activeView && activeView.selectionSection;
+        var overlay = this._ensurePlaybackHighlightSection();
+        if (!liveSection || !overlay) {
+            return false;
+        }
+
+        var polygons = this._cloneSelectionPolygons(liveSection.polygons);
+        if (!polygons.length) {
+            return false;
+        }
+
+        overlay.color = liveSection.color;
+        overlay.setSelectionInfo(liveSection.mode, liveSection.part, polygons);
+        overlay.size = Array.isArray(liveSection.size) ? liveSection.size.slice() : [0, 0];
+        overlay.setPosition(liveSection.position[0], liveSection.position[1]);
+        overlay.setShowSection(true);
+
+        this._clearDocumentSelection();
+        if (app && app.socket && typeof app.socket.sendMessage === 'function') {
+            app.socket.sendMessage('resetselection');
+        }
+        this._restoreCursorState(cursorState);
+        return true;
     },
 
     _hasTextSelection: function () {
@@ -1070,15 +1171,24 @@ window.L.Control.WordMeta = window.L.Control.extend({
     },
 
     _dismissSelectionUi: function () {
+        this.clearTransientPlaybackSelection();
+    },
+
+    clearTransientPlaybackSelection: function () {
+        this._clearPendingCursorBookmarkLookup();
         if (this.map && this.map.contextToolbar && typeof this.map.contextToolbar.hideContextToolbar === 'function') {
             this.map.contextToolbar.hideContextToolbar();
         }
-        if (this.map && typeof this.map.fire === 'function') {
-            this.map.fire('clearselection');
-        }
+        this._clearDocumentSelection();
         if (app && app.socket && typeof app.socket.sendMessage === 'function') {
             app.socket.sendMessage('resetselection');
         }
+    },
+
+    clearPlaybackSelection: function () {
+        this.clearTransientPlaybackSelection();
+        this._hidePlaybackOverlay();
+        this._hasActiveHighlight = false;
     },
 
     /**

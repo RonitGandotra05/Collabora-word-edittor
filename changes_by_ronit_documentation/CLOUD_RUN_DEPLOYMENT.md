@@ -80,19 +80,14 @@ export WOPI_HOST_URL="https://api.tisaproductions.com"
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `extra_params` | `--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*` | Runtime stability flags + CSP frame-ancestors |
+| `extra_params` | `--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=*` | Runtime stability flags + CSP frame-ancestors |
 | `aliasgroup1` | `https://api.tisaproductions.com` | Allowed WOPI host (security) |
 
-> [!CAUTION]
-> **ALWAYS include ALL required origins in `frame_ancestors` when updating env vars.**
-> The `--update-env-vars` command REPLACES the entire value — it does NOT merge with existing values.
-> If you omit any origin, that origin will lose the ability to embed the editor iframe.
->
-> **Required origins (do NOT remove any):**
-> - `http://localhost:3000` — local development
-> - `https://spectacular-faun-b1b38e.netlify.app` — production Netlify frontend
-> - `https://api.tisaproductions.com` — backend WOPI host
-> - `collabora-ronit-version-140170437531.us-central1.run.app:*` — self-reference
+> [!IMPORTANT]
+> **`frame_ancestors` uses `*` (wildcard) because the command-line `--o:` approach splits on spaces.**
+> Listing multiple origins like `--o:net.frame_ancestors=origin1 origin2` does NOT work — only the first origin gets applied.
+> Using `*` is safe because document access is still protected by WOPI access tokens validated by the backend.
+> The frame_ancestors with specific origins is also baked into `coolwsd.xml` inside the Docker image as a fallback.
 
 ---
 
@@ -133,7 +128,7 @@ gcloud run deploy collabora-ronit-version \
   --max-instances 3 \
   --timeout 300 \
   --allow-unauthenticated \
-  --set-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
+  --set-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=*|aliasgroup1=https://api.tisaproductions.com"
 ```
 
 > [!IMPORTANT]
@@ -266,7 +261,7 @@ gcloud run services update collabora-ronit-version \
   --timeout 300 \
   --min-instances 1 \
   --max-instances 3 \
-  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=*|aliasgroup1=https://api.tisaproductions.com"
 ```
 
 ### Force Pull a New Image (After docker push to Docker Hub)
@@ -283,7 +278,7 @@ gcloud run services update collabora-ronit-version \
   --timeout 300 \
   --min-instances 1 \
   --max-instances 3 \
-  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=*|aliasgroup1=https://api.tisaproductions.com"
 ```
 
 > [!IMPORTANT]
@@ -375,7 +370,7 @@ Refused to frame '...' because an ancestor violates the Content Security Policy 
 ```bash
 gcloud run services update collabora-ronit-version \
   --region us-central1 \
-  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=*|aliasgroup1=https://api.tisaproductions.com"
 ```
 
 Verify the CSP:
@@ -486,7 +481,7 @@ gcloud run services update collabora-ronit-version \
   --timeout 300 \
   --min-instances 1 \
   --max-instances 3 \
-  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=http://localhost:3000 https://spectacular-faun-b1b38e.netlify.app https://api.tisaproductions.com collabora-ronit-version-140170437531.us-central1.run.app:*|aliasgroup1=https://api.tisaproductions.com"
+  --update-env-vars "^|^extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:net.proto=IPv4 --o:security.seccomp=false --o:mount_jail_tree=false --o:net.frame_ancestors=*|aliasgroup1=https://api.tisaproductions.com"
 
 # Make public
 gcloud run services add-iam-policy-binding collabora-ronit-version \

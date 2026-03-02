@@ -59,7 +59,7 @@ window.L.Control.DocumentNameInput = window.L.Control.extend({
 		if (this._renaming)
 			return;
 
-		$('#document-name-input').val(this.map['wopi'].BreadcrumbDocName);
+		$('#document-name-input').val('');
 		if (blur !== true) {
 			this.map._onGotFocus();
 		}
@@ -103,21 +103,10 @@ window.L.Control.DocumentNameInput = window.L.Control.extend({
 	onDocLayerInit: function() {
 
 		var el = $('#document-name-input');
-
-		try {
-			var fileNameFullPath = new URL(
-				new URLSearchParams(window.location.search).get('WOPISrc')
-			)
-				.pathname
-				.replace('/wopi/files', '');
-
-			var basePath = fileNameFullPath.replace(this.map['wopi'].BaseFileName , '').replace(/\/$/, '');
-			var title = this.map['wopi'].BaseFileName + '\n' + _('Path') + ': ' + basePath;
-
-			el.prop('title', title);
-		} catch (e) {
-			// purposely ignore the error for legacy browsers
-		}
+		$('#document-titlebar').hide();
+		el.val('');
+		el.prop('title', '');
+		el.removeAttr('data-cooltip');
 
 		// FIXME: Android app would display a temporary filename, not the actual filename
 		if (window.ThisIsTheAndroidApp) {
@@ -147,11 +136,11 @@ window.L.Control.DocumentNameInput = window.L.Control.extend({
 
 	onWopiProps: function(e) {
 		if (e.BaseFileName !== null) {
-			// set the document name into the name field
-			$('#document-name-input').val(e.BreadcrumbDocName !== undefined ? e.BreadcrumbDocName : e.BaseFileName);
 			var input = window.L.DomUtil.get('document-name-input');
-			input.setAttribute('data-cooltip', input.value);
-			window.L.control.attachTooltipEventListener(input, this.map);
+			$('#document-titlebar').hide();
+			$('#document-name-input').val('');
+			input.removeAttribute('data-cooltip');
+			input.removeAttribute('title');
 		}
 		if (!e.UserCanNotWriteRelative && !this.map.isReadOnlyMode()) {
 			// Save As allowed

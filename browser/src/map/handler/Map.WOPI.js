@@ -71,6 +71,9 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		if (this._map._audioPlaybackMode === undefined) {
 			this._map._audioPlaybackMode = false;
 		}
+		if (this._map._audioPlaybackPlaying === undefined) {
+			this._map._audioPlaybackPlaying = false;
+		}
 	},
 
 	addHooks: function () {
@@ -92,8 +95,18 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		// Document-level hotkey interceptor - captures keys before TextInput gets them
 		var that = this;
 		this._hotkeyInterceptor = function (ev) {
+			var isEqualToggle = !ev.repeat && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey && (ev.code === 'Equal' || ev.key === '=');
+			if (isEqualToggle) {
+				ev.preventDefault();
+				ev.stopPropagation();
+				ev.stopImmediatePropagation();
+				that._map.fire('postMessage', { msgId: 'Hotkey_Mode_Toggle', args: {} });
+				return false;
+			}
+
 			var hotkeyMode = that._map && that._map._hotkeyMode;
 			if (!hotkeyMode || !hotkeyMode.enabled) return;
+			if (that._map && that._map._audioPlaybackMode && that._map._audioPlaybackPlaying) return;
 
 			var key = (ev.key && ev.key.length === 1) ? ev.key.toLowerCase() : '';
 			if (key && hotkeyMode.hotkeys && hotkeyMode.hotkeys[key]) {
@@ -115,41 +128,46 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		// Use capture phase to intercept before bubbling to TextInput
 		document.addEventListener('keydown', this._hotkeyInterceptor, true);
 
-		// Audio playback mode interceptor — blocks ALL keys and forwards audio shortcuts.
-		// Runs in capture phase so it fires before TextInput's keydown handler.
+		// Audio transport keys are reserved only when hotkey mode and audio playback mode are both on.
 		this._audioShortcutInterceptor = function (ev) {
-			if (!that._map || !that._map._audioPlaybackMode) return;
+			var hotkeyMode = that._map && that._map._hotkeyMode;
+			if (!that._map || !that._map._audioPlaybackMode || !hotkeyMode || !hotkeyMode.enabled) return;
 
 			var key = ev.key;
 			var isAudioKey = false;
 
-			// Space = play/pause
 			if (key === ' ' || ev.code === 'Space') {
 				isAudioKey = true;
 			}
-			// Arrow keys (with or without Ctrl/Cmd) = navigation / skip
 			if (key === 'ArrowLeft' || key === 'ArrowRight' ||
 				key === 'ArrowUp' || key === 'ArrowDown') {
 				isAudioKey = true;
+			}
+
+			if (!isAudioKey) {
+				if (!that._map._audioPlaybackPlaying) {
+					return;
+				}
+				ev.preventDefault();
+				ev.stopPropagation();
+				ev.stopImmediatePropagation();
+				return false;
 			}
 
 			ev.preventDefault();
 			ev.stopPropagation();
 			ev.stopImmediatePropagation();
 
-			if (isAudioKey) {
-				console.log('[Map.WOPI] Audio shortcut intercepted:', key);
-				that._map.fire('postMessage', {
-					msgId: 'Audio_Shortcut',
-					args: {
-						key: key,
-						ctrlKey: !!ev.ctrlKey,
-						metaKey: !!ev.metaKey,
-						shiftKey: !!ev.shiftKey
-					}
-				});
-			}
-			// All non-audio keys are silently blocked (no editing)
+			console.log('[Map.WOPI] Audio shortcut intercepted:', key);
+			that._map.fire('postMessage', {
+				msgId: 'Audio_Shortcut',
+				args: {
+					key: key,
+					ctrlKey: !!ev.ctrlKey,
+					metaKey: !!ev.metaKey,
+					shiftKey: !!ev.shiftKey
+				}
+			});
 			return false;
 		};
 		document.addEventListener('keydown', this._audioShortcutInterceptor, true);
@@ -1246,8 +1264,10 @@ window.L.Map.WOPI = window.L.Handler.extend({
 		else if (msg.MessageId === 'Audio_Playback_Mode') {
 			var enabled = msg.Values && msg.Values.enabled === true;
 			console.log('[Map.WOPI] Audio_Playback_Mode:', enabled);
-			// Set flag so interceptors can check it
 			this._map._audioPlaybackMode = enabled;
+			if (!enabled) {
+				this._map._audioPlaybackPlaying = false;
+			}
 			if (this._map.wordMeta) {
 				this._map.wordMeta.setAudioPlaybackMode(enabled);
 				this._postMessage({
@@ -1260,6 +1280,11 @@ window.L.Map.WOPI = window.L.Handler.extend({
 					args: { enabled: enabled, success: false, error: 'WordMeta not available' }
 				});
 			}
+		}
+		else if (msg.MessageId === 'Audio_Playback_State') {
+			var playing = msg.Values && msg.Values.playing === true;
+			console.log('[Map.WOPI] Audio_Playback_State:', playing);
+			this._map._audioPlaybackPlaying = playing;
 		}
 	},
 
